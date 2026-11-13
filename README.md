@@ -1,37 +1,39 @@
 # NM Hydrograph Explorer
 
 Composite groundwater-level hydrographs for New Mexico wells, from the NM Unified Water Data API.
+This folder is complete: upload all of it and the site has everything it needs.
 
 ## What's here
 
 | File | What it is |
 |---|---|
 | `index.html` | The whole app. Built from `source/`; don't edit it by hand. |
+| `kriged/` | HUC-10 boundaries and the precomputed kriged basin averages (its own README explains the method). |
+| `readings-snapshot.bin` | Every reading, packed, so the page loads fast. The weekly workflow rebuilds it. |
+| `nm-site-metadata.json` | Well details the API doesn't serve, including each well's vertical datum. |
+| `literature-readings.csv` | Readings from NMBGMR open-file reports that the API doesn't have yet. |
 | `nm-water-table.bin` | Regional water-table grid (NMBGMR 2026 Depth to Water Map v2). |
-| `source/page.html` | Page layout and help text. |
-| `source/app.js` | All of the app's code. |
-| `source/styles.css` | All of the styling. |
-| `source/data.js` | Built-in boundaries and well attributes. |
-| `build.mjs` | Rebuilds `index.html` from `source/`. |
-| `tools/build-snapshot.mjs` | Downloads every reading into `readings-snapshot.bin` (the weekly workflow runs it). |
-| `tools/regress.py` + two `.json` files | The regression test and its reference data (Myers 2022, State Engineer TR 34). |
-| `.github/workflows/pages.yml` | Publishes the site and rebuilds the readings snapshot every Sunday. |
+| `water-systems.js` | Data for the water-systems screen (see below). |
+| `source/page.html`, `app.js`, `styles.css`, `data.js` | The app's source: layout and help, code, styling, built-in boundaries. |
+| `source/water-systems-screen-*` | Code and styling for the water-systems screen (see below). |
+| `build.mjs`, `package.json` | `node build.mjs` rebuilds `index.html` from `source/`; `package.json` has shortcuts for the commands. |
+| `tools/` | `build-snapshot.mjs` (readings snapshot), `build-water-systems.py` (water-systems data), `regress.py` + two `.json` files (regression test). |
+| `.github/workflows/` | `pages.yml` publishes the site and rebuilds the snapshot every Sunday; `build-check.yml` checks `index.html` matches `source/`. |
 
-These also live in the GitHub repository and are left alone: `boundaries/`, `literature-readings.csv`, `nm-site-metadata.json`. `readings-snapshot.bin` is made by the workflow and never committed.
+## Water-systems screen
+The screen for small community water systems (from another session) is included but not connected to the app, as it was before.
+Connecting it adds a "Water systems" tab.
 
 ## Upload to GitHub
-
-1. In the repository, delete the old `src/`, `tests/`, `workflows/` folders, `package.json` and `HOW-TO-UPLOAD.txt` (and `.github/workflows/snapshot.yml` if it's still there).
-2. Upload everything in this folder, keeping the `source/`, `tools/` and `.github/workflows/` folders.
+1. Delete the old files and folders in the repository.
+2. Upload everything in this folder, keeping the folders.
 3. Settings → Pages → Source: **GitHub Actions** (one time).
 
 ## Changing the app
-
-Edit the files in `source/`, run `node build.mjs`, and upload `index.html` along with the changed source file.
+Edit the files in `source/`, run `node build.mjs`, and upload `index.html` with the changed source file.
 `node build.mjs --check` tells you whether `index.html` is up to date.
 
 ## Testing
-
 ```
 python3 -m http.server 8765        # in this folder
 python3 tools/regress.py            # in another terminal

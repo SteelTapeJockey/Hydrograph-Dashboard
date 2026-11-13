@@ -1,0 +1,14 @@
+{
+  "name": "nm-hydrograph-explorer",
+  "private": true,
+  "type": "module",
+  "description": "NM Hydrograph Explorer: a single-page tool for exploring and compositing New Mexico groundwater-level records",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check",
+    "serve": "python3 -m http.server 8765",
+    "test": "python3 tools/regress.py",
+    "snapshot": "node tools/build-snapshot.mjs . readings-snapshot.bin",
+    "water-systems": "python3 tools/build-water-systems.py"
+  }
+}
