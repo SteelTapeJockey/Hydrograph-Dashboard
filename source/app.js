@@ -616,11 +616,11 @@ for(let s=0; s<NSITES; s++){
 function hasElevation(s){ return !isNaN(siteElevation[s]); }
 const escHtml = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // ---- precomputed kriged averages (kriged/ next to the page, or the published GitHub Pages copy) ----
-const KRIG_FALLBACK = 'https://steeltapejockey.github.io/WeaverAPI-Hydrograph-Explorer/boundaries/';   // boundary files (HUC-10, OSE basins)
+const KRIG_FALLBACK = 'https://steeltapejockey.github.io/WeaverAPI-Hydrograph-Explorer/kriged/';
 let krigBaseP = null; const krigFiles = new Map();
 function krigBase(){
   if(!krigBaseP) krigBaseP = (async()=>{
-    for(const b of ['boundaries/', KRIG_FALLBACK]){
+    for(const b of ['kriged/', KRIG_FALLBACK]){
       try{ const r = await fetch(b + 'index.json'); if(r.ok){ const j = await r.json(); if(j && j.units){ window._krigIndex = j; return b; } } }catch(e){}
     }
     return null;
@@ -2946,7 +2946,7 @@ function otFixedEffects(maps, years, minN, km){
   byW.forEach((I, w) => { eff[w] = M.a[w] + (first >= 0 ? M.b[first] : 0); });
   return {med, mean, n, anchor:null, eff};
 }
-// HUC-10 of a well, from boundaries/huc10.geojson (USGS WBD): the polygons load once in the background and each well is
+// HUC-10 of a well, from kriged/huc10.geojson (USGS WBD): the polygons load once in the background and each well is
 // located the first time it is asked for (h10Of), so only the wells in a composite are ever tested
 let siteH10 = null, siteH10P = null, h10Polys = null, otH10Retry = false; const h10Area = new Map();
 function h10Of(s){
@@ -7642,8 +7642,9 @@ function hxHistGroup(keys, y0, y1, at){
     const m = new Map(); by.forEach((a, y) => m.set(y, OT.median(a))); m._s = s;
     if(m.size >= 2) maps.push(m);
     if(at && at[k]){
+      // every reading, whatever the reading filter: this reproduces the report's own measurement
       const md = at[k].slice(5), near = y => { const c = rawDayOf(y + '-' + md); let best = null, bd = 32;
-        for(let i = R.off[s]; i < R.off[s + 1]; i++){ if(!pass(R.fl[i])) continue; const d = Math.abs(R.day[i] - c); if(d < bd){ bd = d; best = R.v[i] / 100; } } return best; };
+        for(let i = R.off[s]; i < R.off[s + 1]; i++){ const d = Math.abs(R.day[i] - c); if(d < bd){ bd = d; best = R.v[i] / 100; } } return best; };
       const a = near(y0), b = near(y1); if(a != null && b != null) ch.push(b - a);
     } else if(m.has(y0) && m.has(y1)) ch.push(m.get(y1) - m.get(y0));
   });
