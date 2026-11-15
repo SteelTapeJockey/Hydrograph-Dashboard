@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NM Groundwater Levels — Hydrograph Explorer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+<!-- @include styles.css -->
+</style>
+</head>
+<body data-theme="light" data-screen="map">
+
+<div id="topbar">
+  <nav id="screen-nav" role="tablist" aria-label="Screen"><button type="button" role="tab" data-screen="map" class="active" aria-selected="true"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Zm0 0v14m6-12v14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span>Map</span></button><button type="button" role="tab" data-screen="charts" aria-selected="false"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 3v18h18M6 15l4-5 4 3 5-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Hydrographs</span></button><button type="button" role="tab" data-screen="both" class="wide-only" aria-selected="false" title="Map and hydrographs together (wide screens)"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 4v16" stroke="currentColor" stroke-width="1.8"/></svg><span>Side by side</span></button></nav>
+  <div id="brand">
+    <span class="mark">NM Hydrograph Explorer</span>
+    <span class="sub">groundwater levels, well by well — with composites</span>
+  </div>
+  <div id="topbar-right">
+  <div class="pill" id="wellcount-pill">Loading wells…</div>
+  <div class="pill live" id="live-pill" style="cursor:pointer;" title="Live data from the NM Unified Water Data API">Live data: connecting…</div>
+  <div class="pill" id="selcount-pill" style="display:none;"></div>
+  <button class="btn" id="btn-copylink" type="button" title="Copy a link that reopens this view (area, period, time step, what is shown)">Copy link</button>
+  <button class="btn" id="btn-project" type="button" title="Save everything about this view to a file, or open one: area of any kind, picked wells, filters, settings, excluded wells and added readings">Project</button><input type="file" id="proj-file" accept=".json,.hxproj" style="display:none">
+  <button class="icon" id="theme-toggle" title="Toggle light/dark">◐</button>
+  <button class="icon" id="help-toggle" title="Help: methods, data and references">?</button>
+</div>
+</div>
+
+<div id="body">
+  <div id="sidebar">
+    <div id="sidebar-resize"></div>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="select">Select Area</button>
+      <button class="tab-btn" data-tab="filters">Data filters</button>
+    </div>
+
+    <!-- FILTERS TAB -->
+    <div class="tabpanel" id="tab-filters">
+      <h3 class="panel-h">Data filters</h3>
+      <p class="hint" style="margin:0 0 12px;"><b>Data filters</b> — choose which wells are eligible before any hydrograph is built. Depth and time limits come first; source, aquifer and geologic lists follow. When an area is selected, each list is re-ticked to only the categories that occur there (the rest are greyed out and the counts show that area).</p>
+      <div class="section">
+        <div class="section-head-row"><h4>Well depth (ft)</h4><button class="toggle-all-btn" data-clear="depth-min,depth-max,depth-require">Clear</button></div>
+        <div class="numrow">
+          <input class="numfield" type="number" id="depth-min" placeholder="min">
+          <span>to</span>
+          <input class="numfield" type="number" id="depth-max" placeholder="max">
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <label><input type="checkbox" id="depth-require"> Only wells with known depth</label>
+        </div>
+        <p class="hint">Well depth is self-reported and missing for many sites (~<span data-stat="depthMissing">34</span>%). Leave blank to include all.</p>
+      </div>
+      <div class="section">
+        <div class="section-head-row"><h4>Depth to water (ft)</h4><button class="toggle-all-btn" data-clear="dtw-min,dtw-max">Clear</button></div>
+        <div class="numrow">
+          <input class="numfield" type="number" id="dtw-min" placeholder="min">
+          <span>to</span>
+          <input class="numfield" type="number" id="dtw-max" placeholder="max">
+        </div>
+        <p class="hint">Filters by each well's average <em>observed</em> water level (not the well's construction depth above) — e.g. set 0–50 to find shallow wells. Uses the well's own mean, so this respects the Season filter in the composite panel below.</p>
+      </div>
+      <div class="section" id="sec-record">
+        <div class="section-head-row"><h4>Well's record reaches</h4><button class="toggle-all-btn" data-clear="year-min,year-max">Clear</button></div>
+        <div class="rec-row"><span>Last reading in or after</span><input class="numfield" type="number" id="year-min" placeholder="e.g. 2020"></div>
+        <div class="rec-row"><span>First reading in or before</span><input class="numfield" type="number" id="year-max" placeholder="e.g. 1990"></div>
+        <p class="hint">Leaves out whole wells whose record ends before, or starts after, these years. Wells that stay keep <em>all</em> their readings, including those from before the year. (The Period control trims the readings as well.)</p>
+      </div>
+      <div class="section">
+        <div class="section-head-row"><h4>Minimum years of data</h4><button class="toggle-all-btn" data-clear="min-years">Clear</button></div>
+        <input class="numfield" type="number" id="min-years" placeholder="e.g. 5" style="width:100%;">
+        <p class="hint">Distinct calendar years with at least one reading — filters out one-off spot checks.</p>
+      </div>
+            <div class="section">
+        <div class="section-head-row">
+          <h4>Data source / network</h4>
+          <button class="toggle-all-btn" data-target="source-list">All / None</button>
+        </div>
+        <div id="source-list"></div>
+      </div>
+      <div class="section">
+        <div class="section-head-row">
+          <h4>Aquifer extent</h4>
+          <button class="toggle-all-btn" data-target="aquifer-list">All / None</button>
+        </div>
+        <div id="aquifer-list"></div>
+        <p class="hint">From the refined 2‑D aquifer-extent boundary set (59 named units) — this is the primary aquifer classification used throughout the app. About <span data-stat="extOutside">35</span>% of wells fall outside any mapped extent.</p>
+      </div>
+      <div class="section">
+        <div class="section-head-row">
+          <h4>Aquifer mapping study area</h4>
+          <button class="toggle-all-btn" data-target="studyarea-list">All / None</button>
+        </div>
+        <div id="studyarea-list"></div>
+        <p class="hint">From NMBGMR's Aquifer Mapping Program project boundaries (41 named study areas). These overlap each other in many places, so a well inside more than one will pass the filter if <em>any</em> of its study areas are checked.</p>
+      </div>
+      <div class="section">
+        <div class="section-head-row">
+          <h4>Geologic formation</h4>
+          <button class="toggle-all-btn" id="fm-all-btn">All / None (shown)</button>
+        </div>
+        <input class="numfield" type="text" id="formation-search" placeholder="search formations, e.g. &quot;Santa Fe&quot; or &quot;Ogallala&quot;" style="width:100%; font-family:var(--font-ui);">
+        <div id="formation-list" style="max-height:200px; overflow-y:auto; margin-top:6px;"></div>
+        <p class="hint" id="formation-hint">Recorded for only ~<span data-stat="formation">13</span>% of wells; the rest fall under "No formation recorded". The search box narrows the list, and "All / None" acts on the rows shown.</p>
+      </div>
+      <div class="section">
+        <div class="section-head-row">
+          <h4>USGS principal aquifer</h4>
+          <button class="toggle-all-btn" id="ua-all-btn">All / None</button>
+        </div>
+        <div id="usgsaq-list"></div>
+        <p class="hint">The broad USGS aquifer classes recorded for most wells. Separate from the formation filter above — a well must pass both.</p>
+      </div>
+      <div class="section">
+        <h4>Multi-agency wells</h4>
+        <p class="hint">Links come from the NM Unified Water Data API's cross-agency clusters (and NMBGMR's cross-reference IDs); <span id="multi-count">692</span> wells are linked. The same physical well can appear once per agency, so each linked set is combined into one well with every agency's readings, listed under NMBGMR where it has one, else the longest record. A month that two agencies report with the same value (within 0.05 ft) is the same measurement stored twice, so it is counted once; different values in the same month are both kept. <span id="merge-note"></span></p>
+      </div>
+
+      <div class="section" id="sec-readq">
+        <h4>Reading quality</h4>
+        <div class="row"><label><input type="checkbox" id="rq-static"> Static water levels only</label></div>
+        <div class="row"><label><input type="checkbox" id="rq-nodist"> Exclude pumping / affected readings</label></div>
+        <div class="row"><label><input type="checkbox" id="rq-approved"> Approved data only</label></div>
+        <select class="selfield" id="rq-method" style="margin-top:6px;">
+          <option value="all">Manual and continuous-logger readings</option>
+          <option value="noLogger">Exclude continuous-logger readings</option>
+          <option value="logger">Continuous-logger readings only</option>
+        </select>
+        <p class="hint" id="rq-hint">Uses the API's per-reading qualifier, approval status and measurement type. Averages and trends are recomputed from the readings that remain.</p>
+      </div>
+      <div class="section" id="sec-wstats">
+        <h4>Well statistics <span class="hint" id="ws-load" style="font-weight:400;"></span></h4>
+        <div class="numrow"><input class="numfield" type="number" step="any" id="ws-slope-min" placeholder="slope min"><span>to</span><input class="numfield" type="number" step="any" id="ws-slope-max" placeholder="slope max"></div>
+        <p class="hint" style="margin-top:2px;">Depth-to-water trend from the API, ft/yr (positive = water level falling).</p>
+        <div class="row"><label><input type="checkbox" id="ws-sig"> Statistically significant trends only (Mann-Kendall p &lt; 0.05)</label></div>
+        <select class="selfield" id="ws-cat" style="margin-top:6px;"><option value="">Any trend category</option></select>
+        <div class="numrow" style="margin-top:6px;"><label style="flex:1.6; font-size:12px; color:var(--ink-2);">Min. record span (yr)</label><input class="numfield" type="number" min="0" step="any" id="ws-span"></div>
+        <div class="numrow"><label style="flex:1.6; font-size:12px; color:var(--ink-2);">Min. readings per year</label><input class="numfield" type="number" min="0" step="any" id="ws-obsyr"></div>
+        <div class="numrow"><label style="flex:1.6; font-size:12px; color:var(--ink-2);">Measured within last (yr)</label><input class="numfield" type="number" min="0" step="any" id="ws-recent"></div>
+        <select class="selfield" id="ws-status" style="margin-top:6px;"><option value="">Any monitoring status</option></select>
+        <p class="hint">From the API's trend, data-density and monitoring-recency tables. Wells without an entry are excluded while a statistic is being filtered.</p>
+      </div>
+      <div class="section" id="sec-wq">
+        <h4>Water quality <span class="hint" id="wq-load" style="font-weight:400;"></span></h4>
+        <select class="selfield" id="wq-mcl">
+          <option value="">Any (no drinking-water filter)</option>
+          <option value="sampled">Has chemistry results</option>
+          <option value="any">Exceeds any MCL</option>
+          <option value="none">Sampled, no MCL exceeded</option>
+          <option value="arsenic">Exceeds arsenic MCL</option><option value="chloride">Exceeds chloride MCL</option><option value="fluoride">Exceeds fluoride MCL</option>
+          <option value="nitrate">Exceeds nitrate MCL</option><option value="sulfate">Exceeds sulfate MCL</option><option value="tds">Exceeds TDS MCL</option><option value="uranium">Exceeds uranium MCL</option>
+        </select>
+        <select class="selfield" id="wq-type" style="margin-top:6px;"><option value="">Any water type</option></select>
+        <div class="numrow" style="margin-top:6px;"><label style="flex:1.6; font-size:12px; color:var(--ink-2);">Max. charge-balance error (%)</label><input class="numfield" type="number" min="0" step="any" id="wq-cb"></div>
+        <select class="selfield" id="wq-hard" style="margin-top:6px;"><option value="">Any hardness class</option></select>
+        <select class="selfield" id="wq-tds" style="margin-top:6px;"><option value="">Any TDS class</option></select>
+        <p class="hint">From the API's MCL-exceedance, water-type, hardness and TDS tables (wells that have chemistry samples). The single-well view can also plot a water-quality time series.</p>
+      </div>
+      <div class="section">
+        <button class="btn full" id="reset-filters">Reset filters</button>
+      </div>
+    </div>
+
+    <!-- SELECT AREA TAB -->
+    <div class="tabpanel active" id="tab-select">
+      <h3 class="panel-h">Choose wells</h3>
+      <div class="section">
+        <h4>Draw or choose an area</h4>
+        <div class="btnrow">
+          <button class="btn" id="btn-draw">✎ Draw polygon</button>
+          <button class="btn" id="btn-upload">⇪ Upload GeoJSON</button>
+        </div>
+        <button class="btn full" id="btn-clear-selection" style="margin-top:8px;">✕ Clear area &amp; reset everything</button>
+        <input type="file" id="file-upload-input" accept=".json,.geojson,application/geo+json">
+        <p class="hint">Draw: click to place vertices, double-click (or the “finish” chip) to close the shape.</p>
+      </div>
+      <div class="section">
+        <h4>County</h4>
+        <select class="selfield" id="county-select">
+          <option value="">Loading county boundaries…</option>
+        </select>
+        <p class="hint" id="county-hint">Fetched live from the NM OSE/ISC ArcGIS county layer.</p>
+      </div>
+      <div class="section">
+        <h4>OSE groundwater basin</h4>
+        <select class="selfield" id="ose-select">
+          <option value="">Loading OSE basins…</option>
+        </select>
+        <p class="hint" id="ose-hint">The 39 declared groundwater basins administered by the NM Office of the State Engineer, fetched live from OSE.</p>
+      </div>
+      <div class="section">
+        <h4>HUC‑8 subbasin</h4>
+        <select class="selfield" id="huc-select">
+          <option value="">Loading HUC‑8 boundaries…</option>
+        </select>
+        <p class="hint">Fetched live from the USGS Watershed Boundary Dataset (8‑digit subbasins clipped to NM).</p>
+      </div>
+      <div class="section">
+        <h4>HUC‑10 watershed</h4>
+        <select class="selfield" id="huc10-select" disabled>
+          <option value="">Choose a HUC‑8 first</option>
+        </select>
+        <p class="hint" id="huc10-hint">The 10‑digit watersheds inside the chosen HUC‑8.</p>
+      </div>
+      <div class="section">
+        <h4>Aquifer extent</h4>
+        <select class="selfield" id="aquext-select">
+          <option value="">Choose an aquifer extent…</option>
+        </select>
+        <p class="hint" id="aquext-hint">From your refined 2‑D aquifer-extent boundary set (178 mapped units, 59 named aquifers) — this is the primary, authoritative aquifer classification in this app; the coarser USGS/WQP category shown in well popups is secondary reference info only.</p>
+      </div>
+      <div class="section">
+        <h4>Aquifer mapping study area</h4>
+        <select class="selfield" id="studyarea-select">
+          <option value="">Choose a study area…</option>
+        </select>
+        <p class="hint">From NMBGMR's Aquifer Mapping Program (44 project boundaries — a few locations have separate entries for distinct mapping phases, shown with their year range).</p>
+      </div>
+      <div class="section">
+        <h4>Selection</h4>
+        <div id="selection-summary">
+          <div class="big" id="sel-count">37,224</div>
+          <div class="lbl">wells match current filters + area</div>
+          <div class="metarow"><span>With known depth</span><b id="sel-depth-pct">–</b></div>
+          <div class="metarow"><span>Median record length</span><b id="sel-years-med">–</b></div>
+        </div>
+        <button class="btn full primary" id="btn-export-sites" style="margin-top:10px;">Export selected wells (CSV)</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div id="selbar" role="status"><span id="selbar-text"></span><button type="button" class="btn primary" id="selbar-go">View hydrographs →</button></div>
+    <div id="draw-hint">
+      <span id="draw-hint-text">Click the map to add vertices · double-click to finish</span>
+      <button id="draw-finish">Finish</button>
+      <button id="draw-cancel">Cancel</button>
+    </div>
+    <div id="legend">
+      <div id="legend-head">
+        <h5>Layers &amp; Legend</h5>
+        <button id="legend-collapse" title="Collapse/expand">▾</button>
+      </div>
+      <div id="legend-scroll">
+        <div class="row"><label><input type="checkbox" id="layer-wells" checked> Well markers</label></div>
+        <div class="row"><label><input type="checkbox" id="layer-onlysel" checked> Show only selected wells (Composite view: only the wells it uses)</label></div>
+        <div class="row"><label><input type="checkbox" id="layer-multi" checked> Ring multi-agency wells (NMBGMR + other)</label></div>
+        <select class="selfield" id="colorby-select">
+          <option value="source">Color: Data source / network</option>
+          <option value="aquifer">Color: Aquifer (broad, secondary)</option>
+          <option value="trend">Color: Water-level trend</option>
+          <option value="recency">Color: Most recent reading</option>
+          <option value="depth">Color: Well depth</option>
+          <option value="multi">Color: Multi-agency wells</option>
+          <option value="overlap">Color: Overlapping aquifer extents</option>
+          <optgroup label="Live API · Water levels">
+            <option value="api:wl_trend">Color: Water-level trend (Mann‑Kendall)</option>
+            <option value="api:wl_status">Color: Current level vs well’s own record</option>
+            <option value="api:wl_recency">Color: Monitoring status (active / stale)</option>
+            <option value="api:wl_change">Color: 5-year water-level change</option>
+            <option value="api:wl_density">Color: Measurement frequency</option>
+            <option value="api:wl_amp">Color: Seasonal amplitude (mean, ft)</option>
+            </optgroup>
+          <optgroup label="Live API · Water quality">
+            <option value="api:wq_mcl">Color: Drinking-water MCL exceedances</option>
+            <option value="api:wq_wqi">Color: Water quality index (CCME)</option>
+            <option value="api:wq_tds">Color: TDS class</option>
+            <option value="api:wq_hard">Color: Hardness</option>
+            <option value="api:wq_type">Color: Water type (Piper)</option>
+            <option value="api:wq_sar">Color: Sodium adsorption ratio class</option>
+            <option value="api:wq_ion">Color: Ion-balance QA</option>
+            <option value="api:wq_as">Color: Arsenic, latest (vs 0.01 mg/L MCL)</option>
+            <option value="api:wq_no3">Color: Nitrate, latest (vs 10 mg/L MCL)</option>
+            <option value="api:wq_f">Color: Fluoride, latest (vs 4 mg/L MCL)</option>
+            <option value="api:wq_u">Color: Uranium, latest (vs 0.03 mg/L MCL)</option>
+            <option value="api:wq_so4">Color: Sulfate, latest (vs 250 mg/L)</option>
+            <option value="api:wq_cl">Color: Chloride, latest (vs 250 mg/L)</option>
+            </optgroup>
+        </select>
+        <div class="row"><label><input type="checkbox" id="layer-counties"> County boundaries</label></div>
+        <div class="row" style="display:none;"><label for="layer-krigmap" style="display:block; margin-bottom:2px;">Kriged water-level change (map by year)</label>
+          <select class="selfield" id="layer-krigmap" style="width:100%;">
+            <option value="off" selected>Off</option>
+            <option value="ose">OSE groundwater basins</option>
+            <option value="huc8">HUC‑8 subbasins</option>
+            <option value="huc10">HUC‑10 watersheds</option>
+            <option value="huc12">HUC‑12 subwatersheds</option>
+          </select></div>
+        <div class="row"><label><input type="checkbox" id="layer-ose"> OSE groundwater basins</label></div>
+        <div class="row"><label><input type="checkbox" id="layer-huc"> HUC‑8 subbasins</label></div>
+        <div class="row"><label><input type="checkbox" id="layer-aquext"> Aquifer extents (all)</label></div>
+        <div class="row"><label><input type="checkbox" id="layer-studyareas"> Aquifer mapping study areas</label></div>
+        <p class="legend-tip">Tip: with a boundary layer on, hover for names and click to list &amp; select them.</p>
+        <hr id="legend-divider">
+        <div id="legend-body"></div>
+      </div>
+    </div>
+    <div id="hover-readout" class="hidden"></div>
+    <div id="basemap-control">
+      <select class="selfield" id="basemap-select">
+        <option value="light">Light (Esri)</option>
+        <option value="dark">Dark (Esri)</option>
+        <option value="topo" selected>Topographic (Esri)</option>
+        <option value="imagery">Imagery (Esri)</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<div id="drawer">
+  <div id="split-handle" role="separator" aria-orientation="vertical" aria-label="Resize map and hydrographs" aria-valuemin="20" aria-valuemax="75" tabindex="0" title="Drag to resize (double-click to reset)"></div>
+  <div id="drawer-resize"></div>
+  <div id="drawer-head">
+    <span class="title">Hydrographs</span><span class="seg" id="view-seg" role="tablist" aria-label="Chart view"><button type="button" data-view="wells" class="active" title="Each selected well's own readings">Wells</button><button type="button" data-view="composite" title="One composite hydrograph built from the selected wells">Composite</button></span> <span class="sub" id="drawer-sub">— select wells to see their hydrographs</span>
+    <div class="spacer"></div>
+    <button class="btn" id="btn-toggle-explain" style="padding:5px 10px;">💬 Explain this</button>
+    <button class="btn" id="btn-export-hydrograph-png" style="padding:5px 10px;" title="Saves the chart as a PNG image with a title and settings summary">Export image (PNG)</button>
+    <button class="btn" id="btn-export-raw" style="padding:5px 10px;" title="One CSV: every water-level reading the API has for the wells (Wells view: every selected well, whatever the chart settings; Composite view: the wells in the composite), with that well's site metadata and summary statistics joined onto each row (matched on source + well id)">Download readings (CSV)</button>
+    <button class="btn" id="btn-export-hydrograph" style="padding:5px 10px;" title="Wells view: one row per well and month as plotted. Composite view: the composite by year, plus a column per well if &quot;Show individual wells&quot; is on">Export chart data (CSV)</button>
+    <button class="btn" id="btn-reset-settings" style="padding:5px 10px;" title="Resets every hydrograph setting and every data filter to its default. Your selected area stays.">↺ Reset settings &amp; filters</button>
+    <button class="icon" id="drawer-collapse" title="Collapse/expand">▾</button>
+  </div>
+  <div id="drawer-body">
+    <div id="drawer-controls">
+      <div id="locator-slot"><div id="locator-head"><span>Where the wells are</span><button type="button" id="locator-expand" title="Back to the full map">Full map ↗</button></div><p class="hint" id="locator-note"></p></div>
+      <p class="hint" id="acc-intro" style="margin:0 0 8px; font-size:12px; color:var(--ink-2);"><span id="acc-intro-text"><b>Every selected well, on its own.</b> Each line is one well's readings (raw, monthly or annual: Time step above the chart). The groups below set the period, cleaning, season, colouring and display; the summary on each bar shows what's set. Switch to <b>Composite</b> (top of this panel) to combine the wells into one hydrograph.</span></p>
+      <div class="section" style="margin-bottom:8px; padding:8px 10px; background:var(--wash); border:1px solid var(--border); border-radius:6px;">
+        <label style="font-weight:700; font-size:12.5px;"><input type="checkbox" id="toggle-allwells" checked> Overview: plot every selected well</label>
+        <p class="hint" style="margin:3px 0 0;">Draws each selected well on its own (up to the "Max. wells to draw" limit in Display, longest records first), with no composite. Use it to see what exists when no composite can be built. Click a line to highlight that well on the map and open its card.</p>
+      </div>
+      <div class="stat-grid">
+        <div class="cell"><div class="v" id="stat-nqual">–</div><div class="l">wells qualify</div></div>
+        <div class="cell"><div class="v" id="stat-npoints">–</div><div class="l" id="stat-npoints-l">years plotted</div></div>
+        <div class="cell"><div class="v" id="stat-meanchg">–</div><div class="l">composite trend / yr</div></div>
+        <div class="cell"><div class="v" id="stat-medchg">–</div><div class="l">median Δ, first→last</div></div>
+      </div>
+
+
+      <div class="acc" data-acc="filters" id="acc-filters">
+        <button class="acc-head" type="button"><span class="acc-title">Data filters</span><span class="acc-sum" id="sum-filters"></span><span class="acc-caret">▸</span></button>
+        <div class="acc-body" id="acc-filters-body"></div>
+      </div>
+      <div class="section" style="margin-bottom:6px;"><div style="font-size:12px; font-weight:700; color:var(--ink-1);">Period shown — drag the ends</div>
+        <div id="yr-slider"><div id="yr-track"></div><div id="yr-fill"></div><input type="range" id="yr-lo" step="1"><input type="range" id="yr-hi" step="1"></div>
+        <div id="yr-readout" class="hint" style="margin:0 0 6px; text-align:center; font-family:var(--font-mono);"></div>
+        </div>
+      <div class="acc" data-acc="schedule">
+        <button class="acc-head" type="button"><span class="acc-title">Composite method</span><span class="acc-sum" id="sum-schedule"></span><span class="acc-caret">▸</span></button>
+        <div class="acc-body">
+        <div class="section">
+          <p class="hint" style="margin-top:0;"><b>Over the Top method.</b> Each well gets one value per year, is checked for spikes, and must have enough years of record. The wells are then fitted together so each well is compared only with itself, and every year with enough wells gets a value in feet of change, with a 95% bootstrap band. A well counts in every year it was measured: no schedule, no bins, nothing shifted between years.</p>
+          <label style="display:block; font-size:12px; color:var(--ink-2); margin-top:4px;">Composite</label>
+          <select class="selfield" id="ot-method">
+            <option value="fe" selected>Matched wells (ft): each well against itself, all years at once</option>
+            <option value="units">Area units (ft): matched wells per HUC-10, then weighted by area</option>
+          </select>
+          <div id="ot-unitkind-row" style="display:none; margin-top:6px;">
+            <label style="display:block; font-size:12px; color:var(--ink-2);">Area units are</label>
+            <select class="selfield" id="ot-unitkind">
+              <option value="huc10" selected>HUC-10 watersheds (pooled into HUC-8 when short)</option>
+              <option value="aquifer">Aquifer outlines (NM 2-D aquifers; each overlap is its own unit)</option>
+            </select>
+          </div>
+          <p class="hint" id="ot-method-hint" style="margin-top:4px;"></p>
+          <label style="display:block; font-size:12px; color:var(--ink-2); margin-top:8px;">Area weighting</label>
+          <select class="selfield" id="ot-cell">
+            <option value="0">Off: every well counts the same</option>
+            <option value="2">Each 2 km cell counts once</option>
+            <option value="5" selected>Each 5 km cell counts once</option>
+            <option value="10">Each 10 km cell counts once</option>
+            <option value="25">Each 25 km cell counts once</option>
+          </select>
+          <p class="hint" style="margin-top:4px;">Every year, wells in the same grid cell share one vote, so a cluster of wells in one wellfield can't outweigh the rest of the area.</p>
+          <label style="display:block; font-size:12px; color:var(--ink-2); margin-top:8px;">Fixed well set</label>
+          <select class="selfield" id="ot-fixed">
+            <option value="0" selected>Off: every qualifying well</option>
+            <option value="50">Wells measured in 50% of the period's years</option>
+            <option value="70">Wells measured in 70% of the period's years</option>
+            <option value="90">Wells measured in 90% of the period's years</option>
+          </select>
+          <p class="hint" id="ot-fixed-hint" style="margin-top:4px;">Keeps only wells measured within 2 years of both ends of the period and in at least that share of its years, so every year uses nearly the same wells. With the period slider at full record, the tool picks the longest period that at least 10 wells cover.</p>
+          <label style="display:block; font-size:12px; color:var(--ink-2); margin-top:8px;">Annual value per well</label>
+          <select class="selfield" id="ot-annual">
+            <option value="median" selected>Median of monthly values (Over the Top)</option>
+            <option value="mean">Reading-weighted mean of the year</option>
+          </select>
+          <label style="display:block; font-size:12px; color:var(--ink-2); margin-top:8px;">Time step of the composite</label>
+          <select class="selfield" id="ot-bin">
+            <option value="1" selected>1 year</option>
+            <option value="3">3 years (1980–82, 1983–85 …)</option>
+            <option value="5">5 years (1980–84, 1985–89 … as in Myers 2022)</option>
+            <option value="10">10 years (1950s, 1960s … as in the NMBGMR storage-change reports)</option>
+          </select>
+          <p class="hint" style="margin-top:2px;">Wells measured on a rotating cycle (most USGS wells: every 5 years) rarely share a year, so a yearly composite has few wells in common between years. With 3- or 5-year steps each well's value is the median of its yearly values in the step, plotted at the step's middle year, so those wells share steps. Trends and the record rules still use the yearly values.</p>
+          <label style="display:flex; gap:6px; align-items:flex-start; font-size:12px; margin-top:8px;"><input type="checkbox" id="ot-split" checked style="margin-top:2px;"> Separate warm- and cool-season levels for each well (Apr–Sep / Oct–Mar)</label>
+          <p class="hint" style="margin-top:2px;">Summer levels near irrigation can be tens of feet deeper than winter ones. With this on, each well's warm-season and cool-season readings get their own level in the fit, so a change in which month wells are measured cannot create a trend. Applies when the month range covers both seasons and the annual value is the median. It removes a fixed summer–winter difference per well, not a summer drawdown that deepens as pumping grows; for that, use the Winter season.</p>
+          <div class="numrow" style="margin-top:8px;">
+            <label id="ot-minn-l" style="flex:1.4; font-size:12px; color:var(--ink-2);">Min. wells per year</label>
+            <input class="numfield" type="number" id="ot-minn" value="5" min="1" style="width:64px;">
+          </div>
+          <div class="numrow" style="margin-top:6px;">
+            <label style="flex:1.4; font-size:12px; color:var(--ink-2);">Min. years with data (per well)</label>
+            <input class="numfield" type="number" id="ot-minyears" value="5" min="2" style="width:64px;">
+          </div>
+          <div class="numrow" style="margin-top:6px;">
+            <label style="flex:1.4; font-size:12px; color:var(--ink-2);">Min. record span, years (per well)</label>
+            <input class="numfield" type="number" id="ot-minspan" value="8" min="0" style="width:64px;">
+          </div>
+          <div class="numrow" style="margin-top:6px;">
+            <label style="flex:1.4; font-size:12px; color:var(--ink-2);">Spike filter, ft/yr between annual values (0 = off)</label>
+            <input class="numfield" type="number" id="ot-spike" value="65" min="0" style="width:64px;">
+          </div>
+          <div class="numrow" style="margin-top:6px;">
+            <label style="flex:1.4; font-size:12px; color:var(--ink-2);">Bootstrap draws (band)</label>
+            <input class="numfield" type="number" id="ot-boot" value="200" min="0" style="width:64px;">
+          </div>
+          <p class="hint" style="margin-top:6px;">Years with fewer wells than the minimum are left empty (red bars under the chart); years with fewer than 10 wells are drawn with hollow markers. The trend and per-well slopes are Theil–Sen with a Mann–Kendall test. For hydrograph clusters, use <b>Splitting the data → Group by → Hydrograph clusters</b>. Starting values follow the literature (Jasechko et al. 2024; Bloomfield &amp; Marchant 2013; Bloomfield et al. 2015) and are not yet validated for New Mexico.</p>
+          <div style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
+            <label style="display:none;"><input type="checkbox" id="krig-show"> Show the basin-average water level (kriged) for HUC‑8 / HUC‑10 selections</label>
+            <p class="hint" id="krig-status" style="display:none;">Pick a HUC‑8 or HUC‑10 to see its kriged average.</p>
+            <label style="display:block; font-size:12px; color:var(--ink-2);" for="ref-file">Reference hydrograph (CSV)</label>
+            <p class="hint" style="margin:2px 0 4px;">Draws an outside series next to the composite (feet). Columns: <code>year</code>, <code>change_ft</code> (water-level change, positive = rising) and optional <code>se_ft</code> (standard error, shown as a 95% range). It is shifted to match the composite in the first year they share.</p>
+            <input type="file" id="ref-file" accept=".csv,.txt" style="max-width:100%;">
+            <p class="hint" id="ref-status" style="margin-top:4px;"></p>
+            <button class="btn full hidden" id="btn-ref-clear" style="margin-top:4px;">Remove reference hydrograph</button>
+          </div>
+          <button class="btn full" id="btn-ot-wells" style="margin-top:6px;" title="One row per well in the composite: years of record, Theil–Sen slope, Mann–Kendall p, spike years dropped, cluster">Download per-well statistics (CSV)</button>
+        </div>
+        </div>
+      </div>
+      <div class="acc" data-acc="window">
+        <button class="acc-head" type="button"><span class="acc-title">Time window</span><span class="acc-sum" id="sum-window"></span><span class="acc-caret">▸</span></button>
+        <div class="acc-body">
+        <div class="section">
+          <div class="row" style="margin-top:4px;">
+          <label><input type="checkbox" id="toggle-wateryear" checked> Use water years (Oct–Sep) instead of calendar years</label>
+        </div>
+        
+          <div style="margin-top:8px; font-size:12px; color:var(--ink-2);">Exact years (same as the slider)</div>
+        <div class="numrow" style="margin-top:3px;">
+          <input class="numfield" type="number" id="yw-min" placeholder="min year" style="flex:1 1 90px; min-width:90px;" title="Minimum year: wells with NO reading in or after this year drop out, and older readings are ignored">
+          <span>to</span>
+          <input class="numfield" type="number" id="yw-max" placeholder="max year" style="flex:1 1 90px; min-width:90px;" title="Maximum year: for historic studies — wells with no reading in or before this year drop out, and newer readings are ignored">
+        </div>
+        <p class="hint" style="margin-top:4px;">A <b>min year</b> removes every well that has no reading from that year onward (not just the old data). A <b>max year</b> lets you study historic periods. <span id="yw-note"></span></p>
+        
+        </div>
+        </div>
+      </div>
+      <div class="acc" data-acc="quality">
+        <button class="acc-head" type="button"><span class="acc-title">Data quality</span><span class="acc-sum" id="sum-quality"></span><span class="acc-caret">▸</span></button>
+        <div class="acc-body">
+<div class="section">
+        <h4>Data quality</h4>
+        <div class="row">
+          <label><input type="checkbox" id="toggle-despike" checked> Remove likely data-entry errors</label>
+        </div>
+        <div class="row wells-only" style="margin-top:2px;"><label><input type="checkbox" id="wv-hideflag"> Wells view: hide flagged readings too</label></div>
+        <p class="hint wells-only" style="margin-top:2px;">The composite leaves flagged readings out. The Wells view shows everything by default and marks them with a red ×; tick this to hide them there as well.</p>
+        <p class="hint" style="margin-top:2px;" id="despike-hint">Flags a year as suspect when it's sandwiched between two neighboring years that agree with each other, but it deviates sharply from the line between them — e.g. a single reading of 120 ft surrounded by readings around 900 ft. A year backed by more independent readings needs a bigger deviation to get flagged.</p>
+        <div class="tol-row" style="margin-top:8px;">
+          <button class="despike-btn" data-thresh="0.25">Strict</button>
+          <button class="despike-btn" data-thresh="0.4">Moderate</button>
+          <button class="despike-btn active" data-thresh="0.6">Lenient</button>
+        </div>
+        <p class="hint" style="margin-top:6px;" id="despike-removed-note"></p>
+        <button class="btn full" id="btn-show-flags-table" style="margin-top:8px;">📋 View flagged readings table</button>
+      </div>
+      <div class="section">
+        <h4>NMBGMR Ocotillo database</h4>
+        <label style="display:flex; gap:6px; align-items:flex-start; font-size:12.5px;"><input type="checkbox" id="oco-on" checked style="margin-top:2px;"> <span>Add readings from the Bureau's Ocotillo database that the unified API doesn't have</span></label>
+        <p class="hint" id="oco-status" style="margin-top:4px;">Wells are checked at start-up; readings are fetched when you select an area (up to 400 NMBGMR wells at a time). A month is only added when the well has no reading that month already.</p>
+        <label style="display:block; font-size:12px; color:var(--ink-2); margin-top:6px;" for="oco-key">API key for private data (optional)</label>
+        <div style="display:flex; gap:6px;"><input type="password" id="oco-key" class="selfield" autocomplete="off" placeholder="paste your Ocotillo API key" style="flex:1; min-width:0;"><button class="btn" id="oco-key-test" style="padding:2px 8px;">Test</button></div>
+        <select id="oco-key-header" hidden><option value="bearer" selected>bearer</option></select>
+        <p class="hint" id="oco-key-status" style="margin-top:4px;">The key is kept only in this browser tab (forgotten when the tab closes) and sent only to ocotillo-api.newmexicowaterdata.org. Private readings are held in memory only, never saved. With a key the tool reloads and reads Ocotillo's private endpoint (/ogcapi-internal). It is sent as an Authorization: Bearer token. Type the key yourself; don't paste it into any AI chat. Files exported while private readings are loaded are named PRIVATE_….</p>
+      </div>
+      <div class="section">
+        <h4>Readings from published reports</h4>
+        <label style="display:flex; gap:6px; align-items:flex-start; font-size:12.5px;"><input type="checkbox" id="lit-on" checked style="margin-top:2px;"> <span>Include readings from NMBGMR open-file reports that the API doesn't have yet</span></label>
+        <p class="hint" id="lit-status" style="margin-top:4px;">Loaded from <code>literature-readings.csv</code> next to this page. A reading the API already has is skipped, so once the API takes these in, the file adds nothing and can be deleted.</p>
+      </div>
+      <div class="section">
+        <h4>Add readings from a file</h4>
+        <p class="hint" style="margin-top:0;">Adds depth-to-water readings to wells already in the tool, for example readings from reports that the API is missing. Accepts a CSV with columns <code>source</code>, <code>id</code> (or one <code>feature_id</code> such as <code>USGS-NWIS:USGS-321828107165501</code>), <code>date</code> and <code>depth_to_water</code>, or the NMBGMR <b>OFR water levels vs API</b> workbook (.xlsx; its "Missing: measurement" rows are used; those are already loaded from the published-reports file above). Kept in this browser until you remove them.</p>
+        <input type="file" id="import-file" accept=".csv,.txt,.xlsx" style="margin-top:4px; max-width:100%;">
+        <p class="hint" id="import-status" style="margin-top:6px;"></p>
+        <button class="btn full hidden" id="btn-import-clear" style="margin-top:6px;">Remove added readings</button>
+      </div>
+
+        </div>
+      </div>
+      <div class="acc" data-acc="split">
+        <button class="acc-head" type="button"><span class="acc-title">Splitting the data</span><span class="acc-sum" id="sum-split"></span><span class="acc-caret">▸</span></button>
+        <div class="acc-body">
+<div class="section">
+        <h4>Group by…</h4>
+        <select class="selfield" id="group-mode">
+          <option value="off">Off (one composite)</option>
+          <optgroup label="By depth">
+            <option value="welldepth">Well (construction) depth</option>
+            <option value="dtw">Depth to water</option>
+          </optgroup>
+          <optgroup label="By category">
+            <option value="formation">Geologic formation</option>
+            <option value="usgsaq">USGS principal aquifer</option>
+            <option value="extent">Aquifer extent (overlap wells in each)</option>
+            <option value="extentcombo">Aquifer extent combination (overlap = own class)</option>
+            <option value="studyarea">Aquifer mapping study area</option>
+            <option value="source">Data source</option>
+          </optgroup>
+          <optgroup label="By hydrograph shape">
+            <option value="cluster">Hydrograph clusters (k-means on z-scores)</option>
+          </optgroup>
+        </select>
+        <div id="group-options" class="hidden" style="margin-top:6px;">
+          <div class="numrow">
+            <label style="flex:1.2; font-size:12px; color:var(--ink-2);">Number of groups</label>
+            <select class="selfield" id="group-n" style="flex:1;"><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select>
+          </div>
+          <input class="numfield" type="text" id="group-breaks" placeholder="optional breakpoints in ft, e.g. 100, 300" style="width:100%; margin-top:6px; font-family:var(--font-ui);">
+          <p class="hint" id="group-info" style="margin-top:4px;"></p>
+        </div>
+        <p class="hint">Splits the qualifying wells into groups and draws a mean and median for each, so unlike wells aren't averaged together. Split by depth (cut points chosen from the selected wells, or typed) or by a category such as formation, USGS aquifer, aquifer extent, study area or data source (the largest groups are drawn and the rest combined). By default the cut points are chosen from the wells you selected, so each group has about the same number of wells; type your own breakpoints to override. "Depth to water" uses each well's average depth to water in the current data; "well depth" is the drilled depth (wells without it are left out).</p>
+      </div>
+<div class="section">
+        <h4>Season</h4>
+        <p class="hint" style="margin-top:0;">Restricts every well's readings to a month range before anything else is computed — winter and summer water levels aren't the same, especially near irrigation. A range that crosses the new year counts as one season: Winter (Nov–Feb) 2020 is Nov–Dec 2019 plus Jan–Feb 2020, the same definition as NMBGMR OFR-616.</p>
+        <p class="hint" style="margin-top:0;"><b>In irrigated or heavily pumped areas, use Winter.</b> Winter readings are the closest to recovered (static) levels; summer readings include drawdown from pumping, and that drawdown usually grows as pumping grows. All year mixes the two, so its line is part water-level change and part change in pumping.</p>
+        <div class="tol-row" style="margin-bottom:8px;">
+          <button class="season-btn active" data-ms="1" data-me="12">All year</button>
+          <button class="season-btn" data-ms="11" data-me="2">Winter</button>
+          <button class="season-btn" data-ms="6" data-me="8">Summer</button>
+          <button class="season-btn" data-ms="4" data-me="10">Irrigation</button>
+        </div>
+        <div class="numrow">
+          <select class="selfield" id="season-month-start" style="flex:1;">
+            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+            <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
+            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+          </select>
+          <span>to</span>
+          <select class="selfield" id="season-month-end" style="flex:1;">
+            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+            <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
+            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+            <option value="10">Oct</option><option value="11">Nov</option><option value="12" selected>Dec</option>
+          </select>
+        </div>
+        <p class="hint hidden" id="season-primary-lock-hint" style="margin-top:6px;">Locked to All year while comparing seasons below — the schedule and qualifying wells need to come from an unfiltered baseline, or the comparison would be biased toward whichever season happened to be active.</p>
+        <div class="row" style="margin-top:10px;">
+          <label><input type="checkbox" id="toggle-season-compare"> Compare seasons on the chart</label>
+        </div>
+        <div id="season-compare-options" class="hidden" style="margin-top:6px;">
+          <div class="row"><label><input type="checkbox" class="season-compare-cb" data-key="winter" checked><span class="swatch" style="background:#2f7fc1"></span>Winter (Nov–Feb)</label></div>
+          <div class="row"><label><input type="checkbox" class="season-compare-cb" data-key="summer" checked><span class="swatch" style="background:#c1652f"></span>Summer (Jun–Aug)</label></div>
+          <div class="row"><label><input type="checkbox" class="season-compare-cb" data-key="irrigation"><span class="swatch" style="background:#7a9c3f"></span>Irrigation (Apr–Oct)</label></div>
+          <div class="row"><label><input type="checkbox" class="season-compare-cb" data-key="allyear"><span class="swatch" style="background:#9aa39a"></span>All year</label></div>
+          <p class="hint" style="margin-top:2px;">Draws one mean/median line pair per checked season, using the same qualifying wells and schedule (built from all-year data) — only the month range used to compute each point changes. Turns off the min–max band and individual-well overlay while active.</p>
+        </div>
+      </div>
+
+        </div>
+      </div>
+      <div class="acc" data-acc="display">
+        <button class="acc-head" type="button"><span class="acc-title">Display</span><span class="acc-sum" id="sum-display"></span><span class="acc-caret">▸</span></button>
+        <div class="acc-body">
+<div class="section">
+        <h4>Value shown</h4>
+        <div class="tol-row" style="margin-bottom:10px;">
+          <button class="mode-btn active" id="btn-mode-depth" data-valuemode="depth">Depth to water</button>
+          <button class="mode-btn" id="btn-mode-elevation" data-valuemode="elevation">Water-surface elev.</button>
+        </div>
+        <p class="hint" id="elev-mode-hint" style="margin-top:0; display:none;">Elevation = each well's reference elevation minus its depth-to-water, so higher on the chart means more water. Only wells with a known reference elevation (~<span data-stat="elevation">98</span>% of sites) can contribute in this mode.</p>
+        <div id="dem-row" style="display:none; margin:2px 0 10px;">
+          <label style="display:block; font-size:12px; color:var(--ink-2);" for="dem-source">Land-surface elevation</label>
+          <select class="selfield" id="dem-source"><option value="dem" selected>Site elevation; fill missing ones from USGS 3DEP (10 m)</option><option value="api">Site elevation only (wells without one are left out)</option></select>
+          <div id="dem-flags" class="hint" style="display:none; margin-top:6px; color:#b45309;"></div>
+          <p class="hint" id="dem-status" style="margin-top:4px;">The site elevation from the API is used wherever it exists. For wells without one, the land elevation is taken from the USGS 3DEP elevation service (mostly lidar) so they can still be plotted.</p>
+        </div>
+        <div class="toggle-row">
+          <span class="tlabel">Normalize per well<br><span style="color:var(--muted); font-size:11px;">(anomaly from each well's own mean)</span></span>
+          <label class="switch" for="toggle-normalize"><input type="checkbox" id="toggle-normalize"><span class="track"></span></label>
+        </div>
+        <select class="selfield" id="normalize-style" style="margin:4px 0;"><option value="ft">Anomaly in feet (departure from own mean)</option><option value="first">Change since first reading</option><option value="usgs">USGS style: % of each well's own range</option></select>
+        <p class="hint">Default shows the raw value in feet. Turn this on to instead show each well's departure from its own average — useful when combining wells with very different depths/elevations into one composite, since raw values would otherwise be dominated by whichever wells happen to be deepest or highest. <b>Applies to the Wells and Overview plots</b>; the composite uses its own standardization (Composite method).</p>
+      </div>
+<div class="section">
+        <div class="toggle-row">
+          <span class="tlabel">Show individual wells</span>
+          <label class="switch" for="toggle-spaghetti"><input type="checkbox" id="toggle-spaghetti"><span class="track"></span></label>
+        </div>
+        <div class="numrow" style="margin:4px 0;">
+          <label style="flex:1.4; font-size:12px; color:var(--ink-2);">Max. wells to draw as lines</label>
+          <input class="numfield" type="number" id="spaghetti-cap" value="500" min="10" max="50000" style="width:64px;">
+        </div>
+        <p class="hint" id="spaghetti-note" style="display:none; color:var(--warn);"></p>
+        <p class="hint" style="margin-top:0;">Click a well's line in the chart to highlight it on the map, or click a well's marker on the map to highlight its line here — either way turns this on if it's off (click the same well again to clear).</p>
+        <div class="toggle-row">
+          <span class="tlabel">Show 95% bootstrap band (median)</span>
+          <label class="switch" for="toggle-band"><input type="checkbox" id="toggle-band" checked><span class="track"></span></label>
+        </div>
+      </div>
+
+        </div>
+      </div>
+    </div>
+    <div id="drawer-chartwrap">
+      <div id="explain-panel">
+        <span class="explain-icon">💬</span>
+        <p id="explain-text">Nothing is selected yet. Draw a polygon, pick an area from the Select Area tab, or click wells on the map to get started.</p>
+        <button class="icon" id="explain-close" title="Hide this explanation">✕</button>
+      </div>
+      <div id="comp-banner" style="display:none; margin:0 0 4px; padding:5px 9px; border-left:3px solid #b45309; background:rgba(180,83,9,.10); font-size:12px; color:var(--ink-1);"></div>
+      <div id="wv-bar" class="wells-only"><span class="tlabel">Time step</span><span class="seg" id="wv-step" role="group" aria-label="Time step"><button type="button" data-step="raw" class="active" aria-pressed="true" title="Every reading, fetched from the API for the wells drawn">Raw readings</button><button type="button" data-step="month" aria-pressed="false" title="Mean of the readings in each month">Monthly</button><button type="button" data-step="year" aria-pressed="false" title="Mean of the readings in each year (water years if that option is on)">Annual</button></span><button type="button" class="btn" id="btn-trends" title="Trend of each selected well over the period shown (Theil–Sen slope), sortable, with a CSV">Trend table</button><button type="button" class="btn" id="btn-compare" title="Compare two date ranges: statistics for each and the change between them">Compare periods</button><button type="button" class="btn hx-bar-btn" id="btn-smallmult" title="One small chart per well (or per group), for checking by eye which wells belong together">Small multiples</button><span class="hint" id="wv-step-note"></span></div><div id="comp-bar" class="comp-only"><button type="button" class="btn hx-bar-btn" id="btn-influence" title="Leave each well out in turn and see how far the composite moves">Well influence</button><button type="button" class="btn hx-bar-btn" id="btn-smallmult-c" title="One small chart per well or per group in the composite">Small multiples</button><button type="button" class="btn hx-bar-btn" id="btn-report" title="One page with the map, the composite, the method and the statistics, to print or save as PDF">Area report (PDF)</button></div><div id="wv-legend" class="wells-only"></div><div id="wv-row"><div id="chart-box"><canvas id="hydrograph-canvas"></canvas></div><div id="wv-list" class="wells-only"><div id="wv-list-inner"><div id="wv-list-head"><b id="wv-list-title">Wells</b><select id="wv-sort" class="selfield" title="Sort the list"><option value="record">Longest record</option><option value="id">Well ID</option><option value="last">Latest value</option><option value="trend">Trend (falling first)</option><option value="recent">Most recently measured</option></select></div><input id="wv-search" class="selfield" type="search" placeholder="find a well ID" autocomplete="off"><div id="wv-rows"></div><p class="hint" id="wv-list-foot"></p></div></div></div>
+      <div id="comp-strip" style="flex:0 0 112px; position:relative; display:none; border-top:1px dashed var(--border);"><canvas id="comp-canvas"></canvas></div>
+      <p class="hint" id="comp-caption" style="display:none; margin:2px 8px 4px; font-size:11.5px;"></p>
+      <div id="cov-strip" style="flex:0 0 70px; position:relative; display:none; border-top:1px dashed var(--border);"><canvas id="cov-canvas"></canvas></div>
+      <p class="hint" id="cov-caption" style="display:none; margin:2px 8px 4px; font-size:11.5px;"></p>
+      <div id="hydrograph-empty">
+        <b>No wells selected yet</b>
+        <span>Draw a polygon, pick a county, basin or HUC, or click wells on the map: each well's readings appear here.</span>
+        <button class="btn" id="btn-show-all-wells" style="display:none; margin-top:10px; padding:6px 12px;">Show all selected wells anyway</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="boot"><div class="boot-card"><h2>NM Hydrograph Explorer</h2><div class="boot-sub">NM groundwater levels — live from the NM Unified Water Data API</div><div id="boot-msg">Starting…</div><div class="boot-bar"><i id="boot-fill"></i></div><div id="boot-detail"></div><div id="boot-actions"></div><div class="boot-guide"><h3>What this tool does</h3><p>Shows the <b>water-level record of every New Mexico well</b> you select, well by well, from the NM Unified Water Data API (NMBGMR, USGS, OSE and ST2 agencies, ISC and others), with NMBGMR's Ocotillo database and published-report readings added where the API lacks them. When you want one line for an area, the <b>Composite</b> tab combines the same wells into a composite hydrograph, each well compared only with itself.</p><div class="boot-cols"><div><h3>Quick start</h3><ol><li><b>Select wells</b>: a county, OSE basin, HUC, aquifer or study area, a drawn polygon, or wells clicked on the map.</li><li><b>Look at the wells</b>: every selected well is drawn as raw readings, monthly or annual values, with a list beside the chart. Click a line or row to find the well on the map; <b>Card</b> opens its own hydrograph and exports.</li><li><b>Narrow it down</b>: period, season, bad-reading removal, depth or elevation, colour by depth, aquifer or source; Data filters for agency, depth, reading quality and more.</li><li><b>Build a composite</b> (optional): the Composite tab fits the same wells together, with a 95% range, wells per year and checks on which wells were measured when.</li></ol></div><div><h3>Abilities</h3><ul><li>Depth to water or water-level elevation, raw or relative to each well's own mean or range.</li><li>Wells measured by several agencies are merged into one record.</li><li>Download every reading for the wells drawn, the monthly values as plotted, or a single well's hydrograph (CSV, GeoJSON, PNG).</li><li>Reading-quality, well-statistics and water-quality filters from the API.</li><li>Composite: matched wells or area units, area weighting, a fixed well set, groups and clusters, season comparison.</li></ul></div></div><h3>Good to know</h3><ul><li>The first visit downloads every water-level reading (about 880,000) and saves it in this browser, so later visits take seconds. Shift+click the live-data chip in the header to refresh everything.</li><li>Every reading is kept in this browser (to the nearest 0.01 ft), so raw readings, monthly and annual values all draw without asking the API again.</li><li>Well points appear once you zoom in to about county scale or pick an area. Large selections draw the wells with the most data first (the limit is in Display).</li></ul></div></div></div>
+<script>window.__bootFail=function(e){var m=document.getElementById("boot-msg"),d=document.getElementById("boot-detail"),a=document.getElementById("boot-actions"),b=document.getElementById("boot");if(b)b.style.display="flex";if(m)m.textContent="Could not load the data";if(d)d.textContent=String(e&&e.message||e);if(a)a.innerHTML='<button class="btn primary" onclick="location.reload()">Try again</button>';};</script>
+
+<div id="single-well-modal" class="hidden">
+  <div id="single-well-card">
+    <div id="sw-head">
+      <div style="flex:1; min-width:0;"><h5 id="sw-title" style="text-transform:none; letter-spacing:0;"></h5><div id="sw-sub"></div></div>
+      <button class="icon" id="sw-close" title="Close">✕</button>
+    </div>
+    <div id="sw-tools">
+      <span class="seg"><button id="sw-mode-depth" class="active">Depth to water</button><button id="sw-mode-elev">Water-surface elev.</button></span>
+      <label><input type="checkbox" id="sw-flag"> Flag likely bad readings</label>
+      <label>Yearly line: <select id="sw-method" class="selfield" style="width:auto;"><option value="weighted">mean of all readings</option><option value="mean">mean of monthly values</option><option value="median">median of monthly values</option></select></label>
+      <span style="flex:1"></span>
+      <button class="btn" id="sw-raw" style="padding:5px 10px;" title="Every reading for this well with its site metadata joined on each row (CSV)">Raw data (CSV)</button>
+      <button class="btn" id="sw-csv" style="padding:5px 10px;">Export CSV</button>
+      <button class="btn" id="sw-geojson" style="padding:5px 10px;">Export GeoJSON</button>
+      <button class="btn" id="sw-png" style="padding:5px 10px;">Export image (PNG)</button>
+    </div>
+    <div id="sw-chartwrap"><canvas id="sw-canvas"></canvas></div>
+    <div id="sw-chem" style="padding:6px 14px 8px; border-top:1px solid var(--border);">
+      <label style="font-size:12px;">Water-quality series for this well: <select id="sw-chem-sel" class="selfield" style="width:auto;"><option value="">none</option><option>arsenic</option><option>bicarbonate</option><option>calcium</option><option>carbonate</option><option>chloride</option><option>fluoride</option><option>magnesium</option><option>nitrate</option><option>potassium</option><option>sodium</option><option>sulfate</option><option>tds</option><option>uranium</option></select></label>
+      <span id="sw-chem-msg" style="font-size:12px; color:var(--muted); margin-left:8px;"></span>
+      <div id="sw-chem-wrap" style="height:170px; display:none; margin-top:6px;"><canvas id="sw-chem-canvas"></canvas></div>
+    </div>
+    <div id="sw-foot">Dots are the mean of all readings in each month (the dataset stores monthly means, not individual readings); the orange line is the yearly value, chosen above. Flagged months (red ×) are left out of the yearly mean and marked in the export.</div>
+  </div>
+</div>
+
+<div id="trend-modal" class="hidden" role="dialog" aria-modal="true" aria-label="Trend table"><div id="trend-card">
+  <div id="trend-head"><h3>Trends by well</h3><label style="font-size:12px; color:var(--ink-2);">Min. years <input id="trend-miny" type="number" min="3" max="60" value="10" class="numfield" style="width:56px;"></label><button type="button" class="btn" id="trend-csv">Download CSV</button><button type="button" class="btn" id="trend-close">Close</button></div>
+  <div id="trend-sum"></div>
+  <div id="trend-note">Slope = Theil–Sen estimate on each well's yearly means over the period shown, in ft per year; positive means the water level is rising (depth to water getting smaller), whichever way the chart is showing it. Wells with fewer years than the minimum are listed without a trend (short records give unreliable slopes). p is Mann–Kendall (optimistic, since yearly values are autocorrelated). Flagged readings are left out. Click a heading to sort and a row to find the well.</div>
+  <div id="trend-scroll"><table id="trend-table"><thead><tr><th data-k="id">Well</th><th data-k="src">Source</th><th data-k="y0">Period</th><th data-k="nYears">Years</th><th data-k="nPts">Readings</th><th data-k="slope">Trend ft/yr</th><th data-k="p">p</th><th data-k="change">Change ft</th></tr></thead><tbody id="trend-body"></tbody></table></div>
+</div></div>
+<div id="cmp-modal" class="hidden" role="dialog" aria-modal="true" aria-label="Compare periods"><div id="cmp-card">
+  <div id="cmp-head"><h3>Compare two periods</h3><button type="button" class="btn" id="cmp-csv">Download CSV</button><button type="button" class="btn" id="cmp-close">Close</button></div>
+  <div id="cmp-controls">
+    <span><span class="pa">Period A</span> <input id="cmp-a0" type="number" class="numfield" placeholder="from"> – <input id="cmp-a1" type="number" class="numfield" placeholder="to"></span>
+    <span><span class="pb">Period B</span> <input id="cmp-b0" type="number" class="numfield" placeholder="from"> – <input id="cmp-b1" type="number" class="numfield" placeholder="to"></span>
+    <span><button type="button" class="btn" data-preset="10">Last 10 yrs vs the 10 before</button> <button type="button" class="btn" data-preset="20">20 vs 20</button></span>
+    <label title="A well needs readings in at least this many different years inside a period to count for it">Min. years per period <input id="cmp-miny" type="number" class="numfield" min="1" max="30" value="3"></label>
+    <label title="Changes smaller than this count as no change">Stable within ± <input id="cmp-stable" type="number" class="numfield" step="0.1" min="0" value="0.5"> ft</label>
+    <label><input type="checkbox" id="cmp-bands" checked> Show A and B on the chart</label>
+  </div>
+  <div id="cmp-status"></div>
+  <div id="cmp-scroll">
+    <table id="cmp-summary"></table>
+    <div id="cmp-histbox"><canvas id="cmp-hist"></canvas></div><div id="cmp-histnote"></div>
+    <p class="hint" style="margin:6px 0;">Each well is summarised from its own readings inside each period (flagged readings, the Season, water years and the reading-quality filters apply; the Period control does not). Mean depth = mean of the yearly means; trend = Theil–Sen slope of the yearly means (needs the minimum years); positive change or trend means the water level is rising (depth to water getting smaller). Change is only computed for wells with enough years in both periods. Click a heading to sort and a row to find the well.</p>
+    <table id="cmp-table"><thead><tr><th data-k="id">Well</th><th data-k="src">Source</th><th data-k="AnYears">A years</th><th data-k="Amean">A mean depth ft</th><th data-k="Aslope">A trend ft/yr</th><th data-k="BnYears">B years</th><th data-k="Bmean">B mean depth ft</th><th data-k="Bslope">B trend ft/yr</th><th data-k="chg">Change ft</th><th data-k="dslope">Trend change ft/yr</th></tr></thead><tbody id="cmp-body"></tbody></table>
+  </div>
+</div></div>
+<div id="help-modal" class="hidden" role="dialog" aria-label="Help: methods, data and references">
+  <div id="help-card">
+    <div id="help-head">
+      <h5>Help: methods, data and references</h5>
+      <div class="spacer"></div>
+      <button class="icon" id="help-close" title="Close">✕</button>
+    </div>
+    <div id="help-body">
+      <nav id="help-toc">
+        <a href="#h-start">Quick start</a><a href="#h-wells">Exploring wells</a><a href="#h-data">Data sources</a><a href="#h-prep">Preparing readings</a><a href="#h-elev">Depth and elevation</a>
+        <a href="#h-comp">Composite hydrograph</a><a href="#h-trend">Trends</a><a href="#h-groups">Groups and clusters</a>
+        <a href="#h-check">Checking a composite</a><a href="#h-files">Your own files</a><a href="#h-export">Exports</a><a href="#h-wateruse">Water use and the assumptions</a><a href="#h-limits">Limitations</a><a href="#h-refs">References</a>
+      </nav>
+
+      <h3 id="h-start">Quick start</h3>
+      <ol>
+        <li><b>Select wells</b> (Map screen, left panel): a county, OSE groundwater basin, HUC-8 or HUC-10, an aquifer area, a drawn polygon, or clicked wells.</li>
+        <li><b>Filter</b> (Map screen: Data filters further down the same panel; Hydrographs screen: the Data filters section under the stats): source, depth, period of record, aquifer, reading quality and so on.</li>
+        <li><b>Look at the wells</b> ("View hydrographs" on the map, or the Hydrographs screen at the top; Wells view is the default): each selected well's readings (raw, monthly or annual), with a list of the wells beside the chart.</li>
+        <li><b>Build a composite</b> (Composite tab, optional): one hydrograph for the selection, with the number of wells behind each year as grey bars. Its method, minimum wells per year and record rules are in the panel beside the chart.</li>
+      </ol>
+      <p>Nothing is drawn until wells are selected, so the page opens quickly. Well points show from zoom level 9 in, or for the selection.</p>
+      <p><b>Screens:</b> <b>Map</b> is for choosing wells; <b>Hydrographs</b> fills the window with the chart, its settings and the well list, with a small map of the selection (click a well there to find its line, or a line to find its well; "Full map" goes back). On the Hydrographs screen, <b>Data filters ▾</b> opens the same filters as the Map screen's panel (one set of controls); the button shows how many selected wells pass and turns amber when filters leave some out. The <b>Period</b> is one control for both screens: drag the slider or type the years (water years are set there too). Readings outside it are left out and wells with none inside it drop out, in the Wells view and the composite; "Draw each well’s whole record" keeps the period for picking wells but draws all of each well’s readings. The slider’s ends are the selection’s first and last years. <b>Trend table</b> (above the chart) lists every selected well's trend over the period, sortable and downloadable. <b>Copy link</b> (top right) copies an address that reopens the same area, period, time step and settings; the data filters and uploaded files are not included. On wide screens, <b>Side by side</b> shows both; drag the divider between them to resize (double-click resets, arrow keys move it), and the split is remembered. The screen is part of the page address, so the browser's Back button moves between them and a saved link opens on the same screen.</p>
+
+      <h3 id="h-wells">Exploring wells (the Wells view)</h3>
+      <ul>
+        <li><b>What a line is:</b> one well, joined in time order and broken where it has no reading for more than 3 years. The <b>Time step</b> switch above the chart sets what each point is:
+          <ul>
+            <li><b>Raw readings</b> (default): every reading. All readings are kept in this browser with the saved copy (about 11 MB, depth to the nearest 0.01 ft), so any selection draws at once. Readings from the same well at partner agencies are merged in, with the same reference-point offset the merge uses, and a partner reading within 0.05 ft of one already in that month counts once. Readings added from published reports, your files and Ocotillo are included (Ocotillo provides monthly means, drawn mid-month). Very dense logger records are thinned for drawing only; tooltips and exports keep every reading.</li>
+            <li><b>Monthly:</b> the mean of the readings in each month.</li>
+            <li><b>Annual:</b> the mean of the readings in each year (water year if that option is on), the same yearly value as the single-well card's default. The composite's own annual value is set separately in its method panel.</li>
+          </ul>
+          The same wells are drawn at every step (ranked by monthly values), so switching changes only the points.</li>
+        <li><b>Settings that apply:</b> the period slider, season (only those months are drawn), bad-reading removal (readings in flagged months are left out; Annual also drops flagged years), depth or elevation, "Normalize per well" (anomaly from the well's own mean, or percent of its range), Data filters, reading quality, Ocotillo, published-report and file readings, and the multi-agency merge. Water years change only the Annual step; raw readings and months are drawn at their own dates.</li>
+        <li><b>Colour:</b> each well its own colour, or by the "Group by" setting (well depth, depth to water, formation, aquifer, extent, study area, source). Hydrograph clusters are built from the composite, so they show in the Composite tab only.</li>
+        <li><b>Nothing hidden by default:</b> readings flagged as likely data-entry errors are drawn and marked with a red × (the composite leaves them out; "Wells view: hide flagged readings too" in Data quality hides them here as well). No reading-quality filter is on until you set one, readings from every agency at the same well are merged in, and readings added from reports, files and Ocotillo are included. Only readings that can't be placed (dates in the future or before 1800, non-numeric values) are dropped.</li>
+        <li><b>How many:</b> up to "Max. wells to draw" (Display, default 500) are drawn, the wells with the most monthly values first. The list beside the chart has every selected well with readings, including those not drawn (Card opens any of them), and the readings download covers every selected well.</li>
+        <li><b>The list:</b> source, first and last year, months of data, latest value and the well's own trend (least squares of its yearly values, + = rising). Sort it, search it, click a row to find the well on the map, or open its <b>Card</b>. Untick <b>use</b> to leave a well out of the composite; it stays drawn here, grey and dashed.</li>
+        <li><b>Precision:</b> depth to water is kept to 0.01 ft. Readings are rounded to 0.01 ft as they are loaded, so two copies of one reading that differ only past the second decimal count once. The readings download keeps the API's value as served (parameter_value) and adds depth_to_water_ft, rounded to 0.01 ft.</li>
+        <li><b>Exports:</b> "Download readings" gives every reading the API has for every selected well (not only those drawn, and whatever the period, season or quality settings), with site metadata. "Export chart data" gives the points as plotted at the current time step (raw readings include their date, time, qualifier, approval and where each came from). "Export image" saves the chart with a title block.</li>
+      </ul>
+
+      <h3 id="h-data">Data sources</h3>
+      <ul>
+        <li><b>Water levels (live):</b> the NM Unified Water Data API, "Weaver" (weaver-api.newmexicowaterdata.org; wells and depth-to-water readings; its previous address is used only if this one cannot be reached). It merges USGS-NWIS, the NM Bureau of Geology and Mineral Resources (NMBGMR), NM OSE/ISC SensorThings feeds (Albuquerque, Bernalillo County, PVACD, EBID, NMOSE-Roswell), the ISC Seven Rivers network and the Water Quality Portal. The readings are saved in your browser, refreshed with new readings on later visits and downloaded again in full every 30 days. A download that comes back empty or short never replaces the saved copy.</li>
+        <li><b>NMBGMR Ocotillo database (live):</b> the Bureau's own database (ocotillo-api.newmexicowaterdata.org, OGC API). At start-up the tool reads Ocotillo's list of wells with water levels and adds any the unified API lacks. When you select an area, it fetches Ocotillo's readings for the selected NMBGMR wells (up to 400 at a time, saved in the browser for 30 days), averages them by month, and adds a month only where the well has no reading that month already, so nothing is counted twice. Ocotillo serves manual and continuous-logger readings together (it can't yet separate them), so logger months count like any other month. Ocotillo's depths are below the <i>measuring point</i> (e.g. the casing top), while the unified API's are below land surface, so they can differ by the measuring-point height (0.66 ft at AR-0001). Ocotillo does not publish that height, so for each well the tool measures it: the median difference (Ocotillo − unified) over months both databases have, if there are at least 3, is subtracted from that well's added Ocotillo months. Wells with fewer than 3 shared months are added unadjusted, and the Ocotillo status line counts them. Optional: an Ocotillo API key (Data filters → NMBGMR Ocotillo database) gives access to private data through Ocotillo's /ogcapi-internal endpoint. The key is kept only in that browser tab (forgotten when it closes) and sent only to Ocotillo; private readings are held in memory and never saved. Private-only wells have no unified-API readings to measure their measuring-point offset against, so they are added unadjusted. Exports and screenshots made while a key is in use can contain private data.</li>
+        <li><b>Readings from published reports:</b> <code>literature-readings.csv</code> holds readings from NMBGMR open-file reports that the API does not have yet, from the "OFR water levels vs API" comparison workbook (27,838 readings at 676 wells, 31 reports). They are added to the matching wells as manual readings. A reading is skipped when that well's month already holds the same value (±0.05 ft), so as the API takes these readings in, the file adds less and less. Readings at wells not in the API are not included because most have no location.</li>
+        <li><b>Well attributes:</b> <code>nm-site-metadata.json</code>: aquifer extent (a refined 2-D aquifer-boundary dataset), aquifer-mapping study area, geologic formation, USGS principal aquifer, well depth and water-quality summaries, matched by site ID.</li>
+        <li><b>Land elevation:</b> the site elevation from the API; the USGS 3D Elevation Program (3DEP) 10 m elevation service fills wells without one and checks the others (see <a href="#h-elev">Depth and elevation</a>).</li>
+        <li><b>Boundaries:</b> counties; the 39 declared groundwater basins of the NM Office of the State Engineer (live from the OSE map service); HUC-8 and HUC-10 watersheds from the USGS Watershed Boundary Dataset.</li>
+      </ul>
+      <p class="help-note">Browsers block a page opened from your own computer (a <code>file://</code> address) from reading files beside it. When the page is opened that way, the tool reads <code>kriged/</code> and <code>literature-readings.csv</code> from the GitHub site instead. Everything works fully on the GitHub site.</p>
+
+      <h3 id="h-prep">Preparing readings</h3>
+      <ul>
+        <li><b>Reading quality:</b> uses the API's qualifier, approval status and measurement type per reading. The options keep static levels only, drop pumping or otherwise affected readings, keep approved data only, or include or exclude continuous-logger readings.</li>
+        <li><b>Multi-agency wells:</b> one physical well can appear under two agencies. Each cross-agency cluster is always merged into one well carrying every agency's readings, listed under NMBGMR where it has one, else under the longest record. Before merging, each partner agency's readings are compared with the kept well's in months both measured; if there are at least 3, their median difference (for example a different measuring point) is removed from the partner's readings, so switching agency does not make a step. A month that two agencies report with the same monthly value (within 0.05 ft) is the same measurement stored twice and is counted once; different values in the same month are both kept. Since the composite uses one value per month, a duplicate can never count twice. The links come from the API's cross-agency clusters and NMBGMR cross-reference IDs.</li>
+        <li><b>Likely data-entry errors</b> (Data quality): a monthly or yearly value is flagged when it lies outside both of its neighbours by at least <i>t</i> × 25 ft and by more than <i>t</i> × √<i>n</i> of the neighbours' size (<i>n</i> = readings behind the value), and by more than 1.5 times the gap between the neighbours. <i>t</i> = 0.6 (Lenient, default), 0.4 (Moderate) or 0.25 (Strict). Flagged values are left out; the table lists them.</li>
+        <li><b>Season:</b> only readings in the chosen months count, before anything else is computed. A range across the new year counts as one season: Winter (Nov–Feb) 2020 is Nov–Dec 2019 plus Jan–Feb 2020. Winter levels are least affected by irrigation pumping.</li>
+        <li><b>Water years</b> (optional): October–September, labelled by the year it ends, as in Myers (2022).</li>
+        <li><b>Well's record reaches</b> (Data filters) keeps or drops whole wells by the first and last year of their record (for example, last reading in or after 2020) and leaves each kept well's readings alone. The <b>Period</b> control also trims the readings. The <b>minimum years</b> filter counts years with readings inside the Period.</li>
+        <li><b>Compare periods</b> (button above the chart) summarises two date ranges side by side, whatever the Period is, and shows the change between them.</li>
+      </ul>
+
+      <h3 id="h-elev">Depth and elevation</h3>
+      <p><b>Depth to water</b> is feet below land surface; larger means a deeper (lower) water table. <b>Water-level elevation</b> = land elevation − depth to water, in feet.</p>
+      <ul>
+        <li>The API site elevation is always used when it exists. Wells without one get the 3DEP land elevation at their location (10 m, bilinear), so they can still be plotted.</li>
+        <li><b>Elevation check:</b> in elevation mode, the selected wells' site elevations are compared with 3DEP. Wells more than 300 ft apart are listed with a warning and marked in the per-well CSV. Their values are not changed. A large difference usually means a wrong location or elevation in the source record. Site elevations also mix vertical datums (NGVD29 and NAVD88, typically a few feet apart in New Mexico).</li>
+      </ul>
+
+      <h3 id="h-comp">Composite hydrograph (the "Over the Top" method)</h3>
+      <p>A composite hydrograph summarizes many wells' own records year by year. Nothing is interpolated between wells or shifted between years.</p>
+      <p><b>The central problem is comparing like with like.</b> Different wells are measured in different years, and a plain average of whatever was measured each year moves whenever the set of wells changes. There are two separate versions of this problem:</p>
+      <ul>
+        <li><b>Which wells:</b> deep and shallow wells (or wells with different own levels) drop in and out of the record. The tool solves this.</li>
+        <li><b>Where the wells are:</b> the measured wells move between parts of the area that behave differently. No composite can fully solve this from well records alone, because nothing records what the unmeasured part did in those years. Area units and area weighting reduce it.</li>
+      </ul>
+      <p>Synthetic tests (300–470 wells, 1960–2020; changes 1960→1990 / 1990→2020):</p>
+      <table style="border-collapse:collapse; font-size:12.5px; margin:4px 0 8px;">
+        <tr><th style="text-align:left; padding:2px 10px 2px 0;">Method</th><th style="text-align:left; padding:2px 10px;">A. Which wells: deep wells measured only after 1990, every well falls 1 ft/yr</th><th style="text-align:left; padding:2px 10px;">B. Where: half the area stable, half falls 2 ft/yr; a dense wellfield in the falling half measured only after 1990</th></tr>
+        <tr><td>Actual</td><td style="padding:2px 10px;">30 / 30 ft</td><td style="padding:2px 10px;">30 / 30 ft (area average)</td></tr>
+        <tr><td>Matched wells, median / mean</td><td style="padding:2px 10px;">30 / 30 ft</td><td style="padding:2px 10px;">−27 / 58 and −11 / 40 ft</td></tr>
+        <tr><td>Chain-linked (removed)</td><td style="padding:2px 10px;">30 / 31 ft</td><td style="padding:2px 10px;">−44 / 58 ft</td></tr>
+        <tr><td>Matched wells + area weighting, median / mean</td><td style="padding:2px 10px;">30 / 30 ft</td><td style="padding:2px 10px;">1 / 1 and 11 / 13 ft</td></tr>
+        <tr><td>Normal score / z-score (removed)</td><td style="padding:2px 10px;">2.0 / 1.8 and 1.7 / 1.6 SD (right shape)</td><td style="padding:2px 10px;">wrong direction early (−1.5 / 3.6 SD)</td></tr>
+        <tr><td>Plain median of depths</td><td style="padding:2px 10px;">135 / 165 ft</td><td style="padding:2px 10px;">43 / 40 ft</td></tr>
+      </table>
+      <p>In case B the early years even get the wrong sign: when wells that enter late follow a steeper trend, a fit with one value per year has to push the early years the other way (an exact least-squares solution gives the same result, so this is the method, not a bug). Area weighting stops the wellfield from dominating, but a median then follows the majority of grid cells, not the area average. The tool therefore warns when this situation shows up in real data (see the composition check below); read those years with caution and compare with Area units.</p>
+      <p>The tool's tools for comparing like with like:</p>
+      <ul>
+        <li><b>Matched wells</b> (default method): every well is compared only with itself (details below). It solves case A.</li>
+        <li><b>Area weighting</b> (default 5 km): each year, the wells in one grid cell share one vote, so a cluster of wells in one wellfield doesn't outweigh the rest of the area. This deals with where wells are, not just which wells.</li>
+        <li><b>Fixed well set</b> (optional): only wells measured within 2 years of both ends of the period and in at least 50, 70 or 90% of its years, so every year uses nearly the same wells. With the period slider at full record, the tool picks the longest period that at least 10 wells cover. This is the strictest comparison, with few wells, and is a check on the other methods.</li>
+        <li><b>Area units</b> (method): within each HUC-10 the wells are combined with the matched-wells fit, then the HUC-10 series are combined the same way, each weighted by its area (the least-squares, area-weighted average). HUC-10s whose wells cover less than half of the years are pooled with the other short ones in their HUC-8. This addresses case B when each area has wells through the period: in case B with 25 km units it gives 26 / 28 ft (actual 30 / 30), against −11 / 40 for matched wells. With 10 km units (about the size of a HUC-12) it gives only 11 / 13, because most small units have short records and drop in and out; that is why HUC-10s, not HUC-12s, are the units. It cannot recreate years when part of the area had no wells at all.</li>
+        <li><b>Composition check</b> (strip under the chart): for each year, how the typical level of the wells measured differs from that of all wells (ft), and how far the centre of the wells measured is from the centre of all wells (km). <b>Warning:</b> the tool warns when, over a 10-year stretch (years with at least 10 wells), the centre of the measured wells sits more than half the wells' typical spread away from the centre of all wells <i>and</i> those wells' own long-term trends (Theil–Sen) differ from the typical well's by at least 0.3 ft/yr (or half the typical trend, if larger). That is case B. In tests on 16 real areas it fired for 5 (for example Roswell basin 1915–1924, Curry County 1954–1959, Santa Fe County 1949–1958).</li>
+      </ul>
+      <p>For the selected wells:</p>
+      <ol>
+        <li><b>Annual value per well:</b> the median of the well's monthly values in each year (default), or the reading-weighted yearly mean.</li>
+        <li><b>Spike filter:</b> an annual value is dropped when it differs from both neighbouring years by more than 65 ft per year (adjustable; 0 = off). End years need only their one neighbour.</li>
+        <li><b>Record rules:</b> a well needs at least 5 years with data spanning at least 8 years inside the period shown (both adjustable).</li>
+        <li><b>Put wells on a common scale</b>, so deep and shallow wells count equally. In each case "up" means more water.
+          <ul>
+            <li><b>Matched wells (ft)</b> (default): a two-way fixed-effects fit, <i>value(well, year) = a<sub>well</sub> + b<sub>year</sub></i>, to all wells at once. <i>a</i> is each well's own typical level, so it cancels out; <i>b</i> is the composite. The mean line is the least-squares fit. The median line is the same model fitted robustly: iteratively reweighted least squares with Huber weights (c = 1.345 × the robust scale of the residuals; Huber, 1981), so outlying readings count less. (Earlier versions used median polish, which a review found biased by about 2 ft over 65 years on unbalanced networks; the reweighted fit removes that bias.) With the season option on, each well has two levels, one for its warm-season (Apr–Sep) and one for its cool-season (Oct–Mar) readings. Every year is tied to every other year through all the wells they share, not through one chain, so no single link can shift the rest. Only wells and years connected to the best-measured year through shared wells are used. The line is shifted so the first plotted year is 0. This is the same idea as a repeat-sales price index (Bailey et al., 1963) and as two-way panel regression.</li>
+            <li><b>Area units (ft):</b> the matched-wells fit inside each HUC-10, then the HUC-10 series combined the same way, each weighted by its area (see the list above).</li>
+          </ul>
+          For depth to water, values are multiplied by −1, so a rising water table plots upward.</li>
+        <li><b>Composite:</b> for each year, the median (dashed) and mean (solid) across the wells with a value that year (for matched wells, the robust and least-squares fits), with area weighting when it is on. A year with fewer wells than <i>Min. wells per year</i> (default 5) is left empty and its bar turns red. Years with fewer than 10 wells get hollow markers.</li>
+        <li><b>Uncertainty band:</b> 95% bootstrap range of the change since the first plotted year (so it is zero there). Groups of nearby wells (5 km grid cells, or HUC-10s in Area units) are resampled with replacement, not single wells, because wells close together share pumping and recharge (default 200 draws, reduced automatically for very large selections; Efron and Tibshirani, 1993). It shows how much the result depends on which wells happen to be in the set, not measurement error. In tests with clustered wells it covered the truth about 90% of the time (75% when single wells were resampled).</li>
+        <li><b>Wells per year</b> (grey bars, right axis): the number of wells behind each plotted value (for matched wells, those connected to the rest).</li>
+      </ol>
+      <p>"Normalize per well" (feet anomaly or USGS % of range, N = −(x − mean)/(max − min) × 100; Myers, 2022, eq. 1) applies to the Overview plot only.</p>
+
+      <h3 id="h-trend">Trends</h3>
+      <ul>
+        <li><b>Theil–Sen slope</b> (Theil, 1950; Sen, 1968): the median of all pairwise slopes between years, in ft per year. Insensitive to outliers.</li>
+        <li><b>Mann–Kendall test</b> (Mann, 1945; Kendall, 1975): the sign of every pair of years gives S; its variance is corrected for ties, and p is two-sided. Annual values are autocorrelated, so p-values are optimistic.</li>
+        <li>Per well: the median slope across wells with a bootstrap 95% CI, the share of wells falling, and the number with p &lt; 0.05. For the composite: the Theil–Sen slope of the yearly median.</li>
+      </ul>
+
+      <h3 id="h-groups">Groups, clusters and season compare</h3>
+      <ul>
+        <li><b>Group by</b> splits the selection (by well depth, depth to water, geologic formation, USGS principal aquifer, aquifer extent or study area) and draws a composite for each group with the same method.</li>
+        <li><b>Stacked aquifers.</b> Where aquifer extents overlap, three groupings help split the wells: <i>head against the mapped water table (an estimate)</i> (separates confined/artesian or perched wells from water-table wells), <i>depth reached below the mapped water table</i> (the screen bottom from the matched OSE well record when there is one, otherwise the well depth, minus the mapped depth to the water table), and <i>top of the screened interval</i> (OSE well records; looked up for the selection when chosen). None of these is an aquifer assignment: tested against the SE New Mexico depth-to-unit rasters (base of the Grayburg = top of the San Andres at Roswell, base of the Ogallala, base of the Pecos Valley alluvium), the best single cut got 82% of wells right at Roswell, 80% under the High Plains and 61% in the Pecos Valley, so the tool does not assign wells by itself.</li>
+        <li><b>Hydrograph clusters</b> (Bloomfield et al., 2015): k-means on each well's z-scores over the years with enough wells. A well joins if it covers 60% of those years. Interior gaps are interpolated for the clustering only, never for the plotted lines. k = Number of groups.</li>
+        <li><b>Season compare</b> draws the same wells using each season's months only.</li>
+      </ul>
+
+      <p><b>Area measured (coverage strip).</b> Under the chart, one bar per year: the share of the area holding the composite's wells that has at least one of those wells measured that year. The area is the set of HUC-10 watersheds (USGS WBD) that contain any qualifying well; a HUC-10 counts as measured in a year if any qualifying well in it has a value that year, and the share is weighted by HUC-10 area. Bars under 50% are amber: in those years the composite describes the measured part of the area, not all of it. The CSV export adds <code>area_measured_pct</code>, <code>huc10_measured</code> and <code>huc10_total</code>. HUC-10s with no qualifying well are left out, so the strip cannot show parts of the area that were never measured.</p>
+      <p class="help-note"><b>Removed methods.</b> Normal-score (SGI) and z-score composites, chain-linked change and the kriged basin average were removed. Normal and z-scores rescale each well over its own record, so wells measured over different periods are not on the same scale: in a test where every well falls 1 ft/yr and half the wells are measured only after 1990, the z-score composite rises 0.9 SD from 1990 to 1998 while every well fell 8 ft. Chain-linked change does worse than matched wells when wells cluster (case B) and drifts where few wells link. The kriging was implemented correctly, but on real data its uncertainty had to be widened in half the basins, about a quarter of the models were rated poor, and every automatic fit stopped at a parameter limit, so the data could not pin the models down.</p>
+
+      <h3 id="h-check">Checking a composite</h3>
+      <ul>
+        <li><b>Well influence</b> (above the composite): each well is left out in turn and the composite rebuilt with the same settings. The table gives how far the change from the first to the last plotted year moves without each well, the largest shift in any one year, and the wells without which the composite loses its first or last year. It answers "is this one odd well?"; <b>Leave out</b> drops a well (bring it back from its map marker or with Reset). Large selections take a minute or two.</li>
+        <li><b>Spread between wells</b> (Display): a dotted band holding the middle half of the wells (25th to 75th percentile) each year. For the feet methods, each well's own reading of the change is its value minus its fitted level, so the band shows how much wells disagree, which the 95% bootstrap band (how sure the median is) does not.</li>
+        <li><b>Small multiples</b> (Wells and Composite views): one small chart per well, or per group when the composite is grouped, on the same time axis. "Same range, own mean removed" gives every tile the same span of feet so shapes compare directly (Barthel and others, 2022); in the Composite view the composite median is drawn faintly behind each well.</li>
+        <li><b>Trend over the period shown</b> (map colour): each selected well's Theil–Sen trend over the Period, Season and water-year settings in use, in ft/yr, + = rising. Wells need the Trend table's minimum years in the period. The API's own trend layer covers each well's whole record instead.</li>
+        <li><b>Likely pumped readings</b> (Reading quality): pumping qualifiers come almost entirely from USGS. This option leaves out readings more than 10, 25, 50 or 100 ft below the median of the well's winter readings (Nov–Mar) in the five years around them; wells with fewer than 3 such winter readings are not tested.</li>
+        <li><b>Production wells</b> (Data filters): each selected well is matched to its own OSE point of diversion (OSE W2W well PODs: within 40 m and of the same depth, within 25 ft or 15%; or, without depths, the only precisely located POD within 15 m) and its permitted use read. Uses counted as production: irrigation, municipal, industrial, commercial, mining, public supply, mutual domestic water association, oil production and secondary recovery, dairy, utility, subdivision, school, mobile-home park, pollution recovery and dewatering. Wells with no matching POD count as not production. The well's card shows its POD.</li>
+        <li><b>Vertical datum</b> (elevation mode): site elevations given in NGVD 29 (about 17,000 USGS wells) are raised to NAVD 88 with NOAA's VERTCON (0.5 to 6 ft in New Mexico), so wells and USGS 3DEP share one datum. The datum of each well comes from the site table next to the page.</li>
+        <li><b>Data-issues report</b> (Data quality): one CSV of problems found in the data for the data providers: links between wells more than 1 km apart, linked wells with very different depths, one well linked to several nested wells, merged wells whose readings disagree by 10 ft or more, site elevations more than 300 ft from 3DEP, readings dated in the future or before 1900, readings deeper than the well, wells placed outside New Mexico, likely data-entry errors, likely pumped readings, and wells whose level differs by more than 150 ft from the median of their neighbours within 5 km after the mapped water-table surface is removed (a wrong elevation, location or depth, or a well in a confined, perched or deeper unit).</li>
+        <li><b>Mapped water table (an estimate, not a measurement)</b> (Data filters, map colour, Group by): the map below is interpolated from wells, largely the same wells the tool shows, so it adds no independent information where wells are dense and is least certain exactly where wells are sparse. Use it to screen and group wells, never as a source of truth; nothing in the tool's interpretation notes or area summary relies on it. each well's mean water-level elevation (land elevation minus the mean of its yearly depths to water) minus the water-table elevation of the NMBGMR (2026) Depth to Water Map of New Mexico v2 at the well. The map's 100-ft water-level-elevation contours are gridded here at 0.01° (about 1 km) by linear interpolation between contours (within 16 ft of the contours at 90% of wells). The map combines OSE driller depths to water at completion (1940s to now), Data Integration Engine wells reduced to one mean each, and springs at 0 ft, with IDW in dense areas and kriging elsewhere, so it is the regional, mostly shallow water table and fits the 1960–1995 levels best. It does not tell perched zones from main aquifers. Across the state the median well is 3 ft below it and half lie between 39 ft below and 27 ft above; wells deeper than 1,200 ft are more than 100 ft below it 41% of the time (wells shallower than 100 ft: 5%). The filter keeps wells on the water table (within ±25, 50, 100 or 200 ft), off it, above it or below it; wells without a land elevation or readings are left out of all four. The map's companion depth-to-water contours are not used: they run 15–25 ft deeper than measured and stop at 750 ft.</li>
+        <li><b>Published numbers for this area</b> (under the chart, when they apply): numbers from reports that cover the selected wells, each with this tool's value where it can be worked out the same way. Myers (2022) table 15 (5-year-bin changes 1980–2019 per aquifer group) and Technical Report 34 (1965–66 change per monitoring area) are recomputed on the reports' own wells with their own procedures; Rinehart et al. (2016) table 2 (storage change per HUC-8 since the 1950s), Rinehart and Mamer (2017) (Quay–Roosevelt–Curry, Lea County, Roswell Artesian Basin) and McGuire (2017) (NM High Plains aquifer, about 1950 to 2015) are shown as context, because storage volumes and whole-aquifer averages are not the same quantity as the composite line. An entry appears when at least a quarter of the selected wells (and at least 3) are among the report's wells or in its area. Not yet included: Wilkins and Garcia (1995, USGS OFR 95-434: 5-year changes 1984–93 for about 36 monitoring areas; its scanned tables need matching well by well, as was done for Technical Report 34) and Rawling (2021, NMBGMR OFR-616; the NMBGMR site blocks automated downloads).</li>
+        <li><b>Area summary</b> (in the area report): one paragraph built from the selection's own data, each statement with its source: the composite change and trend (Helsel et al. 2020), how many wells carry the first and last years and how many were measured in the last 5 years (Taylor &amp; Alley 2001), the share of wells with 5 m or less of water above the bottom (Jasechko &amp; Perrone 2021), NMBGMR dissolved solids, stable isotopes and ¹⁴C ages of wells inside the area, and the published numbers above. It does not use the mapped water table.</li>
+        <li><b>Reading this</b> (in each well's details): short interpretation notes built from that well's own data, each with its source: too few readings or no recent reading (Taylor &amp; Alley 2001); many pumping-affected readings (Cunningham &amp; Schalk 2011); little water above the well bottom, within 5 m, and a straight-line projection of when the trend would reach the bottom (Jasechko &amp; Perrone 2021); long or multiple screens averaging several layers, or an unknown screen (Reilly &amp; Gibs 1993); disagreeing well depths; the dissolved-solids class (USGS); an ion balance beyond ±5% (Hem 1985); deuterium excess against the global meteoric water line (Craig 1961; Clark &amp; Fritz 1997; Eastoe &amp; Wright 2019); and the ¹⁴C apparent age being uncorrected (Plummer &amp; Glynn 2013). The mapped water table is never used for these notes.</li>
+        <li><b>Well details</b> (click a well on the map; the same details are in each well's card on the Hydrographs screen): a drawer on the right with a schematic of the well to scale in depth (borehole, casing and its diameter, screened intervals, pump, total depth, the water level at completion, the latest level, the measured range and the mapped water table, an estimate) and every recorded field. Construction comes from the well's matched OSE record (W2W Well PODs: perforated intervals, depth, completion level, yield, use, file and status, scanned driller's logs and the NMWRRS summary; GIS WATERS PODs: casing size, start, finish and plug dates, pump, discharge, aquifer, PLSS location) and, for NMBGMR wells and wells NMBGMR also measures, from NMBGMR's Ocotillo well record (hole depth, casing diameter and depth, completion date, driller, construction method, pump type and depth, formation). Each value is labelled with its source; where sources disagree on the well depth, all are listed. Casing is drawn to the well's depth, dashed, when its depth is not recorded. Owner names, addresses and contacts in the OSE records are not shown here.</li>
+        <li><b>NMBGMR Ocotillo additions</b> (live from ocotillo-api.newmexicowaterdata.org, checked 2026-11-14):
+          <ul>
+            <li><i>Well details</i> for NMBGMR wells and wells NMBGMR also measures: the water column above the well bottom (latest, range and mean, from <code>well_water_column</code>, plus the tool's own from the latest reading of any source), how the elevation was surveyed, whether the well is in an active NMBGMR monitoring plan and which, NMBGMR's own reading count and trend, the latest major chemistry (<code>major_chemistry_results</code>), and minor and trace chemistry with isotopes (δ²H, δ¹⁸O, δ¹³C in per mil; ¹⁴C in percent modern carbon with its apparent age; <code>minor_chemistry_wells</code>).</li>
+            <li><i>Data filters → NMBGMR monitoring plans:</i> keep only wells NMBGMR actively monitors (<code>actively_monitored_wells</code>, 388 wells in 18 plans), or one plan. A well measured by another agency counts when NMBGMR monitors the same well.</li>
+            <li><i>Layers:</i> springs (794), NMBGMR aquifer-mapping project areas (38, live; the built-in study areas list stays as before) and airborne electromagnetic (AEM) survey areas (6).</li>
+            <li>Not used: geothermal and oil-and-gas collections (bottom-hole temperatures, temperature profiles, heat flow, drill-stem tests), rock and soil-gas samples, meteorological stations, streams, lakes, diversions and outfalls. Ocotillo's water-level summaries and trends repeat what the tool computes from the readings.</li>
+          </ul></li>
+        <li><b>Screened interval</b> (OSE well records): when a well matches its OSE point of diversion (see Production wells) the perforated interval from the well record (PERF_Top_fbgs, PERF_Bot_fbgs; about half of OSE well records have one) is shown in the popup and used by the stacked-aquifer groupings.</li>
+        <li><b>Area units by aquifer outline</b> (Composite → Area units): instead of HUC-10 watersheds, each unit is one combination of the NM 2-D aquifer extents, so an overlap of stacked extents is its own unit; each unit is weighted by its area inside the selection (counted on a 2 km grid; within 5 km of the wells when wells are picked by hand). Units whose wells cover less than half of the years are pooled into one group.</li>
+        <li><b>NMBGMR storage-change screening</b> (Composite, under Time step): one click sets the screening of Rinehart et al. (2016) and Rinehart and Mamer (2017): November–February readings only, no readings flagged as pumping or affected, and 10-year steps (calendar decades, plotted at 1955, 1965 …). It matches their screening, not their kriged maps or storage volumes.</li>
+        <li><b>Historical check</b> (tests): the observation-well tables of State Engineer Technical Report 34 (levels in January–February 1966 with the change from 1965) were read by OCR and each row matched to its API well by its location number (USGS station name) and its published level on the published date: 473 of the report's wells are in the API with the identical reading, and the API readings reproduce 199 of 216 published one-year changes to within 0.02 ft (the rest are OCR misreads). The regression test checks, for 12 monitoring areas (6 to 36 wells each), that the tool's winter levels and its matched-wells fit of the same wells reproduce the published area means of the 1965–66 change. Technical Report 39 (1971) was too poorly scanned to use beyond 57 wells.</li>
+        <li><b>Area report</b> (above the composite): one printable page with a map of the area and its wells, the composite, the method and the statistics. Use the print dialog's "Save as PDF" to keep it.</li>
+        <li><b>Project</b> (top bar): saves everything about the view to a file (any kind of area, any number of picked wells, data filters, reading quality, method, wells left out, added readings, reference hydrograph, map colouring) and opens it again later. Share links carry less.</li>
+      </ul>
+
+      <h3 id="h-files">Your own files</h3>
+      <ul>
+        <li><b>Add readings from a file:</b> a CSV with <code>source</code> and <code>id</code> (or <code>feature_id</code>), <code>date</code> and <code>depth_to_water</code>, or the OFR-vs-API workbook. Readings are added to wells already in the tool and kept in your browser until removed.</li>
+        <li><b>Reference hydrograph:</b> a CSV of <code>year, change_ft[, se_ft]</code> drawn beside the composite.</li>
+        <li><b>Upload an area:</b> a polygon to select wells.</li>
+      </ul>
+
+      <h3 id="h-export">Exports</h3>
+      <p>Composite CSV (year, median, mean, band, wells per year, method; optionally per-well columns), per-well statistics CSV (years, span, Theil–Sen, Mann–Kendall p, spike years dropped, cluster, site and 3DEP elevations, elevation check), raw readings CSV, the flagged-readings table, and a PNG of the chart with the method in its title block.</p>
+
+      <h3 id="h-wateruse">Water use and the assumptions</h3>
+      <p>Water levels in New Mexico are driven mostly by pumping. Each assumption the composite makes, and how water use can break it:</p>
+      <ul>
+        <li><b>All wells in the area see the same year-to-year change, apart from their own level</b> (the matched-wells model). Wells near well fields or irrigated land decline faster than wells away from them, and water use changes over time: a city that switches to surface water recovers near its wells (Albuquerque after 2008), a basin that adds irrigation declines. The composite is an average of these behaviours, weighted by where wells were measured, and monitoring is usually densest where water use is heaviest. That is the "where the wells are" problem (case B); its usual cause is water use. Area units and area weighting even out the geography but do not separate pumped from unpumped parts. Group by well depth or aquifer, or select a smaller area, to keep like with like.</li>
+        <li><b>Each well's summer–winter difference is fixed</b> (the season option). Near irrigation and city wells the summer drawdown grows as pumping grows, and irrigation seasons differ by crop and basin. The option removes a fixed difference only; the Winter season avoids the summer drawdown.</li>
+        <li><b>Readings are static levels.</b> Readings taken while a well, or a nearby well, is pumping are flagged only by some agencies (mostly USGS), so the "pumping / affected" filter misses most of them. The robust fit gives less weight to an occasional low reading, but a production well measured routinely, or one whose pumping schedule changed, stays in. Large differences between agencies at a merged well (listed in Data filters) can be a pumping level against a static one.</li>
+        <li><b>A well's level stands for its surroundings.</b> A well in a pumping cone shows the cone, not the aquifer around it. Area weighting stops dense well fields from outvoting the rest of the area, but cannot tell a cone from a regional decline.</li>
+        <li><b>Change is not a water budget.</b> The composite is feet of water-level change. Converting it to volume needs the area and the specific yield, and relating it to water use needs pumping records, which the tool does not have.</li>
+      </ul>
+
+      <h3 id="h-limits">Limitations</h3>
+      <ul>
+        <li>Matched wells removes each well's own level (case A) but not differences in how places behave (case B). Watch for the composition warning and compare with Area units.</li>
+        <li>Mixing aquifers (for example shallow and artesian aquifers in the Roswell basin) blends different behaviour. Filter by aquifer or depth, or use hydrograph clusters.</li>
+        <li>Thresholds (65 ft/yr, 5 years over 8, 5 wells per year, 60% coverage) are literature starting values (Jasechko et al., 2024; Bloomfield and Marchant, 2013; Bloomfield et al., 2015), not validated for New Mexico.</li>
+        <li>Mann–Kendall p-values ignore autocorrelation.</li>
+        <li>Water use drives most of the changes the composite shows and also breaks several of its assumptions; see <a href="#h-wateruse">Water use and the assumptions</a>. In irrigated or heavily pumped areas, prefer the Winter season.</li>
+      </ul>
+
+      <h3 id="h-refs">References</h3>
+      <ul class="help-refs">
+        <li>Bailey, M.J., Muth, R.F., and Nourse, H.O., 1963, A regression method for real estate price index construction: Journal of the American Statistical Association, v. 58, p. 933–942.</li>
+        <li>Barthel, R., Haaf, E., Nygren, M., and Giese, M., 2022, Systematic visual analysis of groundwater hydrographs: potential benefits and challenges: Hydrogeology Journal, doi:10.1007/s10040-021-02433-w.</li>
+        <li>Blom, G., 1958, Statistical estimates and transformed beta-variables: New York, Wiley.</li>
+        <li>Bloomfield, J.P., and Marchant, B.P., 2013, Analysis of groundwater drought building on the standardised precipitation index approach: Hydrology and Earth System Sciences, v. 17, p. 4769–4787.</li>
+        <li>Bloomfield, J.P., Marchant, B.P., Bricker, S.H., and Morgan, R.B., 2015, Regional analysis of groundwater droughts using hydrograph classification: Hydrology and Earth System Sciences, v. 19, p. 4327–4344.</li>
+        <li>Clark, I.D., and Fritz, P., 1997, Environmental isotopes in hydrogeology: Boca Raton, Lewis Publishers.</li>
+        <li>Craig, H., 1961, Isotopic variations in meteoric waters: Science, v. 133, p. 1702–1703.</li>
+        <li>Cunningham, W.L., and Schalk, C.W., comps., 2011, Groundwater technical procedures of the U.S. Geological Survey: U.S. Geological Survey Techniques and Methods 1–A1.</li>
+        <li>Eastoe, C.J., and Wright, W.E., 2019, Hydrology of mountain blocks in Arizona and New Mexico as revealed by isotopes in groundwater and precipitation: Geosciences, v. 9, no. 11, 461.</li>
+        <li>Efron, B., and Tibshirani, R.J., 1993, An introduction to the bootstrap: New York, Chapman &amp; Hall.</li>
+        <li>Jasechko, S., and Perrone, D., 2021, Global groundwater wells at risk of running dry: Science, v. 372, p. 418–421.</li>
+        <li>Jasechko, S., Seybold, H., Perrone, D., Fan, Y., Shamsudduha, M., Taylor, R.G., Fallatah, O., and Kirchner, J.W., 2024, Rapid groundwater decline and some cases of recovery in aquifers globally: Nature, v. 625, p. 715–721.</li>
+        <li>Helsel, D.R., Hirsch, R.M., Ryberg, K.R., Archfield, S.A., and Gilroy, E.J., 2020, Statistical methods in water resources: U.S. Geological Survey Techniques and Methods, book 4, chap. A3.</li>
+        <li>Hem, J.D., 1985, Study and interpretation of the chemical characteristics of natural water (3rd ed.): U.S. Geological Survey Water-Supply Paper 2254.</li>
+        <li>Kendall, M.G., 1975, Rank correlation methods (4th ed.): London, Griffin.</li>
+        <li>Busch, F.E., and Hudson, J.D., Ground water levels in New Mexico, 1965, and changes in water levels, 1961–1965: New Mexico State Engineer Technical Report 34.</li>
+        <li>Hudson, J.D., and Borton, R.L., 1974, Ground water levels in New Mexico, 1970, and changes in water levels, 1966–1970 (with a section on irrigated acreage by E.F. Sorensen): New Mexico State Engineer Technical Report 39.</li>
+        <li>Mann, H.B., 1945, Nonparametric tests against trend: Econometrica, v. 13, p. 245–259.</li>
+        <li>New Mexico Bureau of Geology and Mineral Resources, 2026, Depth to water map of New Mexico, v2 (kriging + IDW; water-level-elevation contours): Data Integration Engine.</li>
+        <li>McGuire, V.L., 2017, Water-level and recoverable water in storage changes, High Plains aquifer, predevelopment to 2015 and 2013–15: U.S. Geological Survey Scientific Investigations Report 2017–5040.</li>
+        <li>Myers, N.C., 2022, Composite regional groundwater hydrographs for selected principal aquifers in New Mexico, 1980–2019: U.S. Geological Survey Open-File Report 2022–1008, 51 p., doi:10.3133/ofr20221008.</li>
+        <li>Plummer, L.N., and Glynn, P.D., 2013, Radiocarbon dating in groundwater systems, chap. 4 of Isotope methods for dating old groundwater: Vienna, International Atomic Energy Agency.</li>
+        <li>Reilly, T.E., and Gibs, J., 1993, Effects of physical and chemical heterogeneity on water-quality samples obtained from wells: Ground Water, v. 31, no. 5.</li>
+        <li>Rinehart, A.J., and others, 2016, Groundwater level and storage changes in basin-fill aquifers of the Rio Grande basin, New Mexico: New Mexico Water Resources Research Institute Technical Completion Report.</li>
+        <li>Rinehart, A.J., and Mamer, E., eds., 2017, Groundwater level and storage changes in regions of New Mexico (Pecos Slope / Roswell Artesian Basin, San Juan Basin, Southern High Plains): New Mexico Water Resources Research Institute Technical Completion Report.</li>
+        <li>Sen, P.K., 1968, Estimates of the regression coefficient based on Kendall's tau: Journal of the American Statistical Association, v. 63, p. 1379–1389.</li>
+        <li>Taylor, C.J., and Alley, W.M., 2001, Ground-water-level monitoring and the importance of long-term water-level data: U.S. Geological Survey Circular 1217.</li>
+        <li>Theil, H., 1950, A rank-invariant method of linear and polynomial regression analysis: Proceedings of the Royal Netherlands Academy of Sciences, v. 53, p. 386–392, 521–525, 1397–1412.</li>
+        <li>U.S. Geological Survey Water Science School, Saline water and salinity (fresh under 1,000 ppm; slightly saline 1,000–3,000; moderately saline 3,000–10,000; highly saline 10,000–35,000).</li>
+        <li>U.S. Geological Survey, 3D Elevation Program (3DEP) elevation service: elevation.nationalmap.gov.</li>
+        <li>U.S. Geological Survey, Watershed Boundary Dataset (HUC-8 and HUC-10).</li>
+        <li>New Mexico Office of the State Engineer, Declared Groundwater Basins (NM OSE WRAP GIS feature service).</li>
+        <li>New Mexico Unified Water Data API; NMBGMR open-file reports (geoinfo.nmt.edu) via the "OFR water levels vs API" workbook.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div id="flags-modal" class="hidden">
+  <div id="flags-modal-card">
+    <div id="flags-modal-head">
+      <h5>Flagged readings <span id="flags-modal-count"></span></h5>
+      <div class="spacer"></div>
+      <button class="btn" id="btn-export-flags" style="padding:5px 10px;">Export table (CSV)</button>
+      <button class="icon" id="flags-modal-close" title="Close">✕</button>
+    </div>
+    <p class="hint" style="margin:0 16px 8px;">Every reading currently flagged as a likely data-entry error and removed from calculations, dataset-wide (not just your current map selection). Sorted by how severe the deviation is. Adjust the sensitivity or turn the filter off in the Data quality panel to change this list.</p>
+    <div id="flags-modal-body">
+      <table id="flags-table">
+        <thead><tr><th>Well ID</th><th>Source</th><th>Year / month</th><th>Level</th><th>Flagged value (ft)</th><th>Expected (ft)</th><th>Readings</th><th>Severity</th><th></th></tr></thead>
+        <tbody id="flags-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.2.0/pako.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+<script>
+<!-- @include data.js -->
+</script>
+<script id="app-script">
+/* =========================================================================
+   NM Groundwater Levels — Composite Hydrograph Explorer
+   ========================================================================= */
+<!-- @include app.js -->
+</script>
+</body>
+</html>
