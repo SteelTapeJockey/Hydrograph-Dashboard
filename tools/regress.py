@@ -214,8 +214,20 @@ with sync_playwright() as p:
     num = lambda t: float(t.replace('\u2212', '-').split(': ')[-1].split(' ')[0]) if t else None
     tr = [(r['title'], float(r['pub'].split(' ')[0]), num(r['tool'])) for r in pub if r['src'] == 'tr34']
     check('published numbers: TR 34 areas recomputed within 0.1 ft of the published means', tr and all(abs(a - b) <= 0.1 for _, a, b in tr), tr)
+    pc = pg5.evaluate("() => { const d = document.getElementById('pub-strip'); return {open: d.open, cards: d.querySelectorAll('.pub-row').length, det: d.querySelectorAll('.pub-row .pub-det li').length, spark: d.querySelectorAll('.pub-spark svg').length, links: d.querySelectorAll('.pub-row a[href]').length}; }")
+    check('published-number cards are open by default, with details, a chart for Myers and report links', pc['open'] and pc['cards'] == len(pub) and pc['det'] >= 3 * pc['cards'] and pc['spark'] >= 1 and pc['links'] >= 2, pc)
     summ = pg5.evaluate("async () => { const r = await __hx.areaSummary(); return r ? {text: r.text, refs: r.refs, change: r.numbers.change, pub: r.numbers.published.length} : null; }")
     check('area summary: composite change, sources, published numbers, no use of the mapped water table', bool(summ) and summ['change'] and 'Taylor & Alley 2001' in summ['refs'] and summ['pub'] >= 3 and summ['text'].count('mapped water table') == 1 and summ['text'].endswith('The mapped water table is not used in this summary.'), summ and summ['text'][:300])
+    # 18. context under the composite: drought, metered pumping, public water systems (context-data.bin)
+    pg5.evaluate("() => document.querySelector('#view-seg [data-view=composite]').click()"); pg5.wait_for_timeout(5000)
+    cx = pg5.evaluate("""async () => { await __hx.ctxRender(); const c = __hx.ctx; return {last: c.data && c.data.usdm.last, drought: c.drought && c.drought.label, dv: c.drought ? c.drought.vals.filter(v => v).length : 0,
+      pump: c.pump && c.pump.n, pumpYears: c.pump && c.pump.years ? c.pump.years.length : 0, pws: c.pws && c.pws.systems.length, pop: c.pws && c.pws.pop,
+      vis: [...document.querySelectorAll('#ctx-strips .ctx-row')].map(e => getComputedStyle(e).display)}; }""")
+    check('context (10-year steps here, so 3 decades since 2000): Drought Monitor for Chaves County, metered pumping and public water systems in the county', cx['last'] and cx['last'] >= '2026-01-01' and cx['drought'] == 'Chaves County' and cx['dv'] >= 3 and cx['pump'] and cx['pump'] > 50 and cx['pumpYears'] >= 20 and cx['pws'] and cx['pws'] >= 5 and cx['vis'] == ['block', 'block'], cx)
+    cs = pg5.evaluate("async () => { const r = await __hx.areaSummary(); return r ? r.sentences.join(' ') : ''; }")
+    check('area summary includes drought, metered pumping, public water systems and NMED static levels', all(k in cs for k in ['U.S. Drought Monitor', 'OSE meter readings', 'public water system', 'NMED recorded a one-time static water level']), cs[-700:])
+    sw = pg5.evaluate("async () => { const l = __hx.swlList(); const g = await __hx.swlLayer(); return {n: l.length, flagged: l.filter(x => x.flags.length).length, markers: g.getLayers().length, box: !!document.getElementById('layer-nmed-swl')}; }")
+    check('NMED static water levels: 1,500+ supply wells, map layer and checkbox, a few flagged', sw['n'] >= 1500 and sw['markers'] == sw['n'] and sw['box'] and 0 < sw['flagged'] < 50, sw)
     rep = pg5.evaluate("async () => { const r = await __hx.reportBuild(); return {pub: r.published, summ: !!r.summary, h: [...document.querySelectorAll('#hx-report h2')].map(e => e.textContent)}; }")
     check('area report has the area summary and the published-numbers table', rep['summ'] and rep['pub'] >= 3 and 'Area summary' in rep['h'] and 'Published numbers for this area' in rep['h'], rep)
     pg5.close()

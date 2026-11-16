@@ -13,11 +13,12 @@ This folder is complete: upload all of it and the site has everything it needs.
 | `nm-site-metadata.json` | Well details the API doesn't serve, including each well's vertical datum. |
 | `literature-readings.csv` | Readings from NMBGMR open-file reports that the API doesn't have yet. |
 | `nm-water-table.bin` | Regional water-table grid (NMBGMR 2026 Depth to Water Map v2). |
+| `context-data.bin` | Context drawn under the composite and used in the area summary: U.S. Drought Monitor weekly area shares (state, counties, HUC-8s, HUC-10s), screened OSE metered pumping by well, and NMED public water systems. Rebuild with `tools/build-context-data.py`. |
 | `water-systems.js` | Data for the water-systems screen (see below). |
 | `source/page.html`, `app.js`, `styles.css`, `data.js` | The app's source: layout and help, code, styling, built-in boundaries and the published numbers the area comparisons use (Myers 2022, Technical Report 34, Rinehart et al. 2016). |
 | `source/water-systems-screen-*` | Code and styling for the water-systems screen (see below). |
 | `build.mjs`, `package.json` | `node build.mjs` rebuilds `index.html` from `source/`; `package.json` has shortcuts for the commands. |
-| `tools/` | `build-snapshot.mjs` (readings snapshot), `build-water-systems.py` (water-systems data), `regress.py` + two `.json` files (regression test). |
+| `tools/` | `build-snapshot.mjs` (readings snapshot), `build-water-systems.py` (water-systems data), `build-context-data.py` (drought, pumping and public water systems; reads the OSE meter harvest, the Drought vs Groundwater dashboard's Drought Monitor files and the small water systems tool's data), `regress.py` + two `.json` files (regression test). |
 | `.github/workflows/` | `pages.yml` publishes the site and rebuilds the snapshot every Sunday; `build-check.yml` checks `index.html` matches `source/`. |
 
 ## Water-systems screen
