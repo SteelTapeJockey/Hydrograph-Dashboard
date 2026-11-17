@@ -236,7 +236,7 @@ button.btn.active{background:var(--accent-soft); border-color:var(--accent); col
   width:270px; flex:0 0 auto; border-right:1px solid var(--border); padding:12px 14px; overflow-y:auto;
 }
 #drawer-chartwrap{flex:1; min-width:0; padding:10px 16px 6px; position:relative; display:flex; flex-direction:column; overflow-y:auto;}
-#chart-box{flex:1 0 auto; min-height:260px; position:relative;}
+#chart-box{flex:1 0 auto; min-height:360px; position:relative;}
 #comp-caption a{cursor:pointer; color:var(--accent);}
 #chart-box canvas{position:absolute; inset:0;}
 #comp-strip canvas, #cov-strip canvas{position:absolute; inset:0;}
@@ -291,7 +291,7 @@ button.btn.active{background:var(--accent-soft); border-color:var(--accent); col
 }
 .despike-btn.active{background:var(--accent); border-color:var(--accent); color:var(--accent-ink);}
 #explain-panel{
-  flex:0 0 auto; display:flex; align-items:flex-start; gap:10px; margin:0 0 8px; padding:7px 10px; max-height:58px; overflow-y:auto;
+  flex:0 0 auto; display:flex; align-items:flex-start; gap:10px; margin:0 0 8px; padding:7px 10px; max-height:40vh; overflow-y:auto;
   background:var(--accent-soft); border:1px solid var(--accent); border-radius:8px;
 }
 #explain-panel.hidden{display:none;}
@@ -429,8 +429,8 @@ input[type="range"]{accent-color:var(--accent); width:100%;}
 #drawer[data-view="wells"] .comp-only{display:none !important;}
 #drawer[data-view="composite"] .wells-only{display:none !important;}
 #drawer[data-view="wells"] .acc[data-acc="schedule"]{display:none;}
-#wv-row{flex:1 0 auto; min-height:260px; display:flex; position:relative;}
-#wv-row #chart-box{flex:1 1 auto; min-width:0; min-height:260px;}
+#wv-row{flex:1 0 auto; min-height:360px; display:flex; position:relative;}
+#wv-row #chart-box{flex:1 1 auto; min-width:0; min-height:360px;}
 #wv-list{flex:0 0 300px; position:relative; margin-left:12px; border-left:1px solid var(--border);}
 #wv-list-inner{position:absolute; inset:0; display:flex; flex-direction:column; gap:5px; padding-left:10px;}
 #wv-list-head{display:flex; align-items:center; gap:6px;}
@@ -747,8 +747,8 @@ body[data-theme="dark"] .wd-wl-last-tri, body[data-theme="dark"] .wd-l-wl-last{f
 #sw-detail{padding:4px 16px 16px; border-top:1px solid var(--border); display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:0 22px; align-items:start;}
 #sw-detail .wd-loading{grid-column:1 / -1;}
 /* with the well drawer open, the selection bar and the map's right-hand controls move left of it */
-body.wd-open #selbar{left:calc((100% - min(440px, 92%)) / 2);}
-body.wd-open #basemap-control, body.wd-open .leaflet-right{margin-right:min(440px, 92%);}
+body.wd-open:not([data-screen="charts"]) #selbar{left:calc((100% - min(440px, 92%)) / 2);}
+body.wd-open:not([data-screen="charts"]) #basemap-control, body.wd-open:not([data-screen="charts"]) .leaflet-right{margin-right:min(440px, 92%);}
 
 .wd-notes ul{margin:0; padding-left:18px;} .wd-notes li{margin:0 0 5px; line-height:1.4;}
 #pub-strip{flex:0 0 auto; margin:2px 8px 4px; font-size:12px; border-top:1px dashed var(--border); padding-top:3px;}
@@ -772,3 +772,28 @@ body.wd-open #basemap-control, body.wd-open .leaflet-right{margin-right:min(440p
 #ctx-strips{flex:0 0 auto;} .ctx-row{border-top:1px dashed var(--border);} .ctx-canvas{position:relative; height:62px;}
 .ctx-cap{margin:2px 8px 4px; font-size:11.5px;}
 .ctx-warn{display:block; margin-bottom:2px; padding:3px 8px; border-left:3px solid #b45309; background:rgba(180,83,9,.08); color:var(--ink-1);}
+
+/* explanation: two lines until "More" */
+#explain-panel:not(.open) p{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
+#explain-more{flex:0 0 auto; border:0; background:none; color:var(--accent); font-weight:600; font-size:12px; cursor:pointer; padding:0 2px; align-self:flex-end;}
+/* header: the title gives way (ellipsis) instead of sliding under the status chips */
+#topbar{grid-template-columns:auto minmax(0, 1fr) auto;}
+#topbar #brand{min-width:0; max-width:100%; overflow:hidden;}
+#topbar #brand .mark{overflow:hidden; text-overflow:ellipsis;}
+@media (max-width: 2100px){ #topbar #brand .sub{display:none;} }
+@media (max-width: 1700px){ #wellcount-pill{display:none;} }
+/* locator map: one-line attribution */
+#locator-slot .leaflet-control-attribution{font-size:9px; white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis;}
+/* published numbers: compact cards, method and notes folded */
+#pub-strip .pub-body{max-height:34vh; overflow-anchor:none;}
+.pub-more{margin:3px 0 2px;} .pub-more > summary{cursor:pointer; color:var(--accent); font-size:11.5px; font-weight:600;}
+.pub-more[open] > summary{margin-bottom:2px;}
+
+/* toolbar buttons all the same size */
+#wv-bar .btn, #comp-bar .btn, .hx-bar-btn{padding:4px 10px; font-size:12px; line-height:1.35; min-height:0;}
+/* published-number cards keep their own height */
+.pub-grid{align-items:start;}
+/* long captions under the composite: two lines until clicked */
+.ctx-txt, #cov-caption{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; cursor:pointer;}
+#cov-caption{flex:0 0 auto;}
+.ctx-txt.open, #cov-caption.open{display:block; -webkit-line-clamp:unset;}

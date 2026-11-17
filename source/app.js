@@ -1,3 +1,4 @@
+var hxAppReady = false, hxRenderPending = false;
 (async function(){
 "use strict";
 
@@ -1233,6 +1234,9 @@ function defaultFilters(){
   };
 }
 const state = {
+  // reading-quality rules: set here so a chart drawn while the page is still loading (a link straight to the Hydrographs
+  // screen) finds them; the Reading quality controls further down use the same object
+  readQ: {static:false, noDisturbed:false, approved:false, method:'all'},
   theme:'light',
   filters:{
     sources: new Set(SOURCES.map((_,i)=>i)),
@@ -4081,6 +4085,12 @@ function renderWellsView(set){
   const muted = getComputedStyle(document.body).getPropertyValue('--muted').trim();
   const revAxis = state.valueMode === 'depth' && !useUsgsNorm();
   const unit = useUsgsNorm() ? ' %' : ' ft';
+  // value axis fitted to the data at a fine step (labels stay on the coarser round step), so one shallow or artesian reading
+  // doesn't add a whole empty label step
+  let yLo = Infinity, yHi = -Infinity; datasets.forEach(d => d.data.forEach(p => { if(p && isFinite(p.y)){ if(p.y < yLo) yLo = p.y; if(p.y > yHi) yHi = p.y; } }));
+  let yFit = null;
+  if(isFinite(yLo) && yHi > yLo){ const r = yHi - yLo, p10 = Math.pow(10, Math.floor(Math.log10(r))), lab = [0.1, 0.2, 0.25, 0.5, 1].map(k => k * p10).find(v => r / v <= 7) || p10, fine = lab / 4;
+    yFit = {min: Math.floor(yLo / fine) * fine, max: Math.ceil(yHi / fine) * fine, stepSize: lab}; }
   if(chart){ chart.destroy(); chart = null; }
   chart = new Chart(canvas.getContext('2d'), {
     type: 'line', data: {datasets},
@@ -4105,8 +4115,9 @@ function renderWellsView(set){
       scales: {
         // the time axis spans the period (the slider's ends), so the chart, the slider and the stats agree
         x: {type: 'linear', min: wv.fullRecord ? undefined : (state.yearWindow.min != null ? state.yearWindow.min : YR_MIN), max: wv.fullRecord ? undefined : (state.yearWindow.max != null ? state.yearWindow.max : YR_MAX) + 1,
-          ticks: {color: muted, callback: v => Number.isInteger(v) ? String(v) : ''}, grid: {color: 'rgba(125,136,115,.2)'}, title: {display: true, text: WV_STEP[stepUsed].axis + (stepUsed === 'year' && state.waterYear ? ', water years' : ''), color: muted}},
-        y: {reverse: revAxis, ticks: {color: muted}, grid: {color: 'rgba(125,136,115,.2)'}, title: {display: true, text: wrapAxisTitle(yAxisTitle(), canvas.clientHeight - 60), color: muted}}
+          ticks: {color: muted, includeBounds: false, callback: v => Number.isInteger(v) ? String(v) : ''}, grid: {color: 'rgba(125,136,115,.2)'}, title: {display: true, text: WV_STEP[stepUsed].axis + (stepUsed === 'year' && state.waterYear ? ', water years' : ''), color: muted}},
+        // fitted to the data (with a little room) so one shallow or artesian reading doesn't add a whole empty tick step
+        y: {reverse: revAxis, min: yFit ? yFit.min : undefined, max: yFit ? yFit.max : undefined, ticks: {color: muted, includeBounds: false, stepSize: yFit ? yFit.stepSize : undefined}, grid: {color: 'rgba(125,136,115,.2)'}, title: {display: true, text: wrapAxisTitle(yAxisTitle(), canvas.clientHeight - 60), color: muted}}
       }
     }
   });
@@ -4186,10 +4197,10 @@ function wvRenderList(){
   }).join('') || `<p class="hint" style="margin:8px;">${rows.length ? 'No well matches.' : 'Wells appear here once they are drawn.'}</p>`;
   const bits = [];
   if(list.length > MAXROWS && q) bits.push(`First ${MAXROWS} of ${list.length} matches shown.`);
-  if(wv.hidden) bits.push(`${wv.hidden.toLocaleString()} well(s) listed but not drawn ("Max. wells to draw" in Display).`);
-  if(wv.noData) bits.push(`${wv.noData.toLocaleString()} without readings under the current settings.`);
+  if(wv.hidden) bits.push(`The chart draws ${(rows.length - wv.hidden).toLocaleString()} of the ${rows.length.toLocaleString()} wells (those with the most monthly values); raise "Max. wells to draw" in Display to draw more.`);
+  if(wv.noData) bits.push(`${wv.noData.toLocaleString()} selected well${wv.noData === 1 ? ' has' : 's have'} no readings in the period, season and reading rules.`);
   const nEx = rows.filter(w => state.excludedSites.has(w.site)).length;
-  if(rows.length > MAXROWS && !q) bits.unshift(`Showing ${MAXROWS} of ${rows.length.toLocaleString()} wells; search to find others.`);
+  if(rows.length > MAXROWS && !q) bits.unshift(`The list shows the first ${MAXROWS.toLocaleString()} of ${rows.length.toLocaleString()} wells; search to find others.`);
   if(nEx) bits.push(`${nEx} left out of the composite.`);
   foot.textContent = bits.join(' ');
 }
@@ -4432,7 +4443,7 @@ function hxFiltersLabel(){
   if(state.areaSelection && state._inAreaBase){ const b = state._inAreaBase; for(let i = 0; i < b.length; i++) if(b[i] && !merged(i)) inArea++; state.clickSelectedSites.forEach(s => { if(!b[s] && !merged(s)) inArea++; }); }
   else if(state.clickSelectedSites.size) state.clickSelectedSites.forEach(s => { if(!merged(s)) inArea++; });
   else for(let i = 0; i < NSITES; i++) if(!merged(i)) inArea++;
-  el.textContent = `${pass.toLocaleString()} of ${inArea.toLocaleString()} wells pass`;
+  el.textContent = pass === inArea ? `all ${inArea.toLocaleString()} pass` : `${pass.toLocaleString()} of ${inArea.toLocaleString()} pass`;
   acc.classList.toggle('filtered', pass < inArea);
   el.title = pass < inArea ? `Filters (data filters and the period) are leaving out ${(inArea - pass).toLocaleString()} of the ${inArea.toLocaleString()} wells in the selection` : 'No well in the selection is left out';
 }
@@ -5074,7 +5085,7 @@ function renderCovStrip(result){
   window._covResult = result;
   const C = coverageOf(result);
   if(!C){ box.style.display = 'none'; cap.style.display = 'none'; return; }
-  cap.style.display = 'block';
+  cap.style.display = '';
   if(C.pending){ box.style.display = 'none'; cap.textContent = 'Area measured: loading HUC-10 boundaries…'; return; }
   window._lastCoverage = Object.assign({labels: result.labels}, C);
   box.style.display = 'block';
@@ -5106,11 +5117,14 @@ function renderCovStrip(result){
 }
 function compositeAxisTitle(){
   const m = state.otp.method;
-  if(m === 'ns') return 'Composite normal score (SD units, up = more water)';
-  if(m === 'z') return 'Composite z-score (SD units, up = more water)';
-  return state.valueMode === 'elevation' ? 'Change in water-surface elevation since first year (ft, up = more water)' : 'Change in depth to water since first year (ft, deeper ↓)';
+  if(m === 'ns') return 'Normal score (SD, up = wetter)';
+  if(m === 'z') return 'z-score (SD, up = wetter)';
+  return state.valueMode === 'elevation' ? 'Change since first year (ft, up ↑)' : 'Change since first year (ft, deeper ↓)';
 }
 function renderChart(){
+  // a link straight to the Hydrographs screen asks for a chart while the rest of the app is still being set up (later
+  // declarations are not reachable yet); draw it once setup has finished
+  if(!hxAppReady){ hxRenderPending = true; return; }
   try{ renderCompStrip(null); }catch(e){}
   try{ renderCovStrip(null); }catch(e){}
   const empty = document.getElementById('hydrograph-empty');
@@ -5436,7 +5450,7 @@ function yAxisTitle(){
   if(state.valueMode === 'elevation'){
     return state.normalize ? (state.normalizeStyle === 'first' ? 'Elevation change since first reading (ft, up = more water)' : 'Water-surface elevation anomaly (ft)') : 'Water-surface elevation (ft, higher ↑ = more water)';
   }
-  return state.normalize ? (state.normalizeStyle === 'first' ? 'Depth change since first reading (ft, deeper ↓)' : 'Depth-to-water anomaly (ft, deeper ↓)') : 'Depth-to-water (ft below ground, deeper ↓)';
+  return state.normalize ? (state.normalizeStyle === 'first' ? 'Change since first reading (ft, deeper ↓)' : 'Depth anomaly (ft, deeper ↓)') : 'Depth to water (ft, deeper ↓)';
 }
 function hexA(hex, a){
   hex = hex.replace('#','').trim();
@@ -6327,7 +6341,7 @@ async function fetchRawTimeseries(siteIdxs, onProgress){
 /* -------------------------------------------------------------------- */
 /* 19. Reading quality, API well statistics / water-quality filters, chemistry series */
 /* -------------------------------------------------------------------- */
-state.readQ = {static:false, noDisturbed:false, approved:false, method:'all'};
+if(!state.readQ) state.readQ = {static:false, noDisturbed:false, approved:false, method:'all'};
 if(!state.filters.api) state.filters.api = defaultFilters().api;
 function readQDefault(){ const q = state.readQ; return !q.static && !q.noDisturbed && !q.approved && q.method === 'all' && !q.pumpHeur; }
 function readPass(){
@@ -8173,7 +8187,7 @@ function hxPubCompChange(y0, y1){
 }
 // a small chart: labels along x, one or two series (bars or lines), zero line, values at the ends
 function hxPubSpark(o){
-  const W = 300, H = 92, pl = 34, pr = 8, pt = 8, pb = 18, n = o.labels.length;
+  const W = 300, H = 92, pl = 34, pr = 14, pt = 8, pb = 18, n = o.labels.length;
   const all = []; o.series.forEach(s => s.vals.forEach(v => { if(v != null && isFinite(v)) all.push(v); })); (o.marks || []).forEach(m => all.push(m.v)); all.push(0);
   let lo = Math.min(...all), hi = Math.max(...all); if(hi - lo < 1e-9){ hi += 1; lo -= 1; } const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
   const X = i => pl + (n > 1 ? i * (W - pl - pr) / (n - 1) : (W - pl - pr) / 2), Y = v => pt + (hi - v) * (H - pt - pb) / (hi - lo);
@@ -8181,7 +8195,10 @@ function hxPubSpark(o){
   const fmt = v => Math.abs(v) >= 10 ? Math.round(v) : (+v.toFixed(1));
   let g = `<line x1="${pl}" x2="${W - pr}" y1="${Y(0)}" y2="${Y(0)}" class="ps-zero"/>`;
   g += `<text x="${pl - 4}" y="${Y(hi - pad) + 3}" class="ps-ax" text-anchor="end">${fmt(hi - pad)}</text><text x="${pl - 4}" y="${Y(lo + pad) + 3}" class="ps-ax" text-anchor="end">${fmt(lo + pad)}</text>`;
-  o.labels.forEach((l, i) => { if(n <= 6 || i === 0 || i === n - 1 || i % Math.ceil(n / 4) === 0) g += `<text x="${X(i)}" y="${H - 4}" class="ps-ax" text-anchor="middle">${escHtml(l)}</text>`; });
+  { const want = o.labels.map((l, i) => n <= 6 || i === 0 || i === n - 1 || i % Math.ceil(n / 4) === 0), keep = [];
+    want.forEach((w, i) => { if(!w) return; if(i === n - 1){ while(keep.length > 1 && X(i) - X(keep[keep.length - 1]) < 52) keep.pop(); keep.push(i); }
+      else if(!keep.length || X(i) - X(keep[keep.length - 1]) >= 52) keep.push(i); });
+    keep.forEach(i => { g += `<text x="${X(i)}" y="${H - 4}" class="ps-ax" text-anchor="${n > 1 && i === n - 1 ? 'end' : n > 1 && i === 0 ? 'start' : 'middle'}">${escHtml(o.labels[i])}</text>`; }); }
   o.series.forEach((s, k) => {
     if(s.kind === 'bar') s.vals.forEach((v, i) => { if(v == null) return; const y = Y(Math.max(v, 0)), h = Math.abs(Y(v) - Y(0)); g += `<rect x="${X(i) - bw / 2}" y="${y}" width="${bw}" height="${Math.max(h, 0.8)}" class="ps-s${k}"><title>${escHtml(s.name + ', ' + o.labels[i] + ': ' + v)}</title></rect>`; });
     else { let d = '', on = false; s.vals.forEach((v, i) => { if(v == null){ on = false; return; } d += (on ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); on = true; });
@@ -8297,7 +8314,7 @@ function hxPubHtml(rows){
     ${r.diff ? `<div class="pub-kv"><span class="pub-k">Difference</span><span>${escHtml(r.diff)}</span></div>` : ''}
     ${r.says ? `<div class="pub-kv"><span class="pub-k">Report says</span><span>${escHtml(r.says)}</span></div>` : ''}
     ${r.spark ? hxPubSpark(r.spark) : ''}
-    ${r.details && r.details.length ? `<ul class="pub-det">${r.details.map(d => `<li>${escHtml(d)}</li>`).join('')}</ul>` : ''}
+    ${r.details && r.details.length ? `<details class="pub-more"><summary>Method and notes</summary><ul class="pub-det">${r.details.map(d => `<li>${escHtml(d)}</li>`).join('')}</ul></details>` : ''}
     <div class="pub-cover"><i>${escHtml(r.cite)}</i></div></div>`).join('');
 }
 function hxPubRender(){
@@ -8307,6 +8324,7 @@ function hxPubRender(){
   hxPub.rows = pool && pool.size ? hxPubFor(pool) : [];
   box.style.display = hxPub.rows.length ? '' : 'none';
   box.querySelector('summary').innerHTML = `Published numbers for this area <span class="pub-n">${hxPub.rows.length}</span>`;
+  box.querySelector('.pub-body').scrollTop = 0;
   box.querySelector('.pub-body').innerHTML = `<div class="pub-grid">${hxPubHtml(hxPub.rows)}</div><p class="hint">An entry appears when at least a quarter of the selected wells (and at least 3) are among the report's wells or in its area. "This tool" is recomputed from the readings whenever the method allows (Myers 2022 and Technical Report 34, on the reports' own wells); storage volumes and whole-aquifer averages are not the same quantity as the composite line, so they are shown for context. The mapped water table is not used.</p>`;
 }
 var hxPubT = 0;
@@ -8515,8 +8533,8 @@ async function hxCtxRender(){
       options: {responsive: true, maintainAspectRatio: false, animation: false, plugins: {legend: {display: false}, tooltip: {callbacks: {label: c => c.raw ? `${c.dataset.label}: ${c.raw.toFixed(0)}% of the area` : ''}}},
         scales: {x: {display: false, stacked: true}, y: yAx('drought %', {stacked: true, min: 0, max: 100, ticks: {color: muted, maxTicksLimit: 3, callback: v => v + '%'}}), y2}}}));
     const d2 = dr.vals.map((v, i) => v ? [res.xvals[i], v[2] + v[3] + v[4]] : null).filter(Boolean), worst = d2.slice().sort((a, b) => b[1] - a[1])[0];
-    dRow.querySelector('.ctx-cap').innerHTML = escHtml(`Drought (U.S. Drought Monitor, ${dr.label}; weekly maps ${dr.first.slice(0, 4)}–${dr.last}, averaged over each plotted ${state.otp.bin > 1 ? 'step' : 'year'}${seasonIsFullYear() ? '' : ' and season'}): share of the area in each category, yellow (abnormally dry) to dark red (exceptional).` +
-      (worst ? ` Most severe: ${worst[0]}, ${worst[1].toFixed(0)}% in severe drought or worse.` : '') + ' Years before 2000 have no Drought Monitor maps.');
+    dRow.querySelector('.ctx-cap').innerHTML = '<span class="ctx-txt" title="Click to read all">' + escHtml(`Drought (U.S. Drought Monitor, ${dr.label}; weekly maps ${dr.first.slice(0, 4)}–${dr.last}, averaged over each plotted ${state.otp.bin > 1 ? 'step' : 'year'}${seasonIsFullYear() ? '' : ' and season'}): share of the area in each category, yellow (abnormally dry) to dark red (exceptional).` +
+      (worst ? ` Most severe: ${worst[0]}, ${worst[1].toFixed(0)}% in severe drought or worse.` : '') + ' Years before 2000 have no Drought Monitor maps.') + '</span>';
   }
   // pumping
   const pu = hxCtxPumping(res); hxCtx.pump = pu;
@@ -8531,9 +8549,9 @@ async function hxCtxRender(){
     const lf = pu.lastFull, r = lf ? pu.byYear.get(lf) : null;
     const fell = r && pu.peak && r.n < 0.7 * pu.peak[1];
     pRow.querySelector('.ctx-cap').innerHTML = (fell ? `<span class="ctx-warn">Meters reporting fell from ${pu.peak[1]} (${pu.peak[0]}) to ${r.n} (${lf}): pumping at the wells that stopped reporting is missing from the later bars, not zero.</span> ` : '') +
-      escHtml(`Metered groundwater pumping (OSE meter readings, ${pu.how}; ${pu.n.toLocaleString()} metered wells): stacked by use, irrigation green, public supply blue, domestic purple, other brown; the dashed line is how many meters reported.` +
+      '<span class="ctx-txt" title="Click to read all">' + escHtml(`Metered groundwater pumping (OSE meter readings, ${pu.how}; ${pu.n.toLocaleString()} metered wells): stacked by use, irrigation green, public supply blue, domestic purple, other brown; the dashed line is how many meters reported.` +
       (r ? ` ${lf}: ${Math.round(r.g.reduce((a, b) => a + b, 0)).toLocaleString()} acre-ft from ${r.n} meters.` : '') +
-      ' Only metered wells count, and fewer than half of New Mexico\'s withdrawals are metered, so this is a floor; bars rise and fall as meters start and stop reporting as well as with pumping. Implausible meter years were screened out (Help).');
+      ' Only metered wells count, and fewer than half of New Mexico\'s withdrawals are metered, so this is a floor; bars rise and fall as meters start and stop reporting as well as with pumping. Implausible meter years were screened out (Help).') + '</span>';
   }
   if(!anyD && !anyP) box.style.display = 'none';
   // public water systems, for the summary and the report
@@ -8543,6 +8561,8 @@ var hxCtxT = 0;
 function hxCtxSched(){ clearTimeout(hxCtxT); hxCtxT = setTimeout(() => { hxCtxRender().catch(e => console.warn('context strips', e)); }, 600); }
 (function hxCtxInit(){
   hxCtxEls(); document.getElementById('ctx-strips').style.display = 'none';
+  // long captions under the composite: two lines until clicked
+  document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('.ctx-txt, #cov-caption'); if(t && !e.target.closest('a, button')) t.classList.toggle('open'); });
   const prev = renderChart; renderChart = function(){ const r = prev.apply(this, arguments); hxCtxSched(); return r; };
 })();
 // sentences for the area summary
@@ -8633,6 +8653,15 @@ window.__hx = Object.assign(window.__hx || {}, {gwfs: GWFS, gwfsSelectRegion, gw
       first: n ? rawDateOf(R.day[R.off[s]]) : null, last: n ? rawDateOf(R.day[R.off[s + 1] - 1]) : null,
       years: n ? new Set(Array.from(R.day.subarray(R.off[s], R.off[s + 1]), d => rawDateOf(d).slice(0, 4))).size : 0}; },
   get nSites(){ return SITES.length; }});
+(function hxExplainMore(){
+  const pnl = document.getElementById('explain-panel'), btn = document.getElementById('explain-more'), p = document.getElementById('explain-text'); if(!pnl || !btn || !p) return;
+  const sync = () => { const open = pnl.classList.contains('open'); btn.textContent = open ? 'Less' : 'More'; btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.style.visibility = open || p.scrollHeight > p.clientHeight + 2 ? 'visible' : 'hidden'; };
+  btn.addEventListener('click', () => { pnl.classList.toggle('open'); sync(); });
+  new MutationObserver(() => requestAnimationFrame(sync)).observe(p, {childList: true, characterData: true, subtree: true});
+  window.addEventListener('resize', () => requestAnimationFrame(sync)); requestAnimationFrame(sync);
+})();
+hxAppReady = true; if(hxRenderPending){ hxRenderPending = false; renderChart(); }
 setTimeout(()=>{ apiLoadClusters().catch(e=>{ console.warn('clusters failed', e); apiState.clusters = 'error'; }); }, 400);
 BOOT.ui.done();
 })().catch(e=>{ console.error(e); if(window.__bootFail) window.__bootFail(e); });
