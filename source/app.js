@@ -1423,6 +1423,8 @@ const countiesLayer = L.layerGroup();
 const hucLayer = L.layerGroup();
 const aquiferExtentLayer = L.layerGroup();
 const studyAreaLayer = L.layerGroup();
+// NMBGMR groundwater-summary (GWFS) regions and their sub-regions (data.js)
+const GWFS = loadGz(GWFS_B64), gwfsLayer = L.layerGroup();
 const areaLayer = L.layerGroup().addTo(map); // drawn/uploaded/county/huc highlight outline
 
 /* -------------------------------------------------------------------- */
@@ -2046,6 +2048,8 @@ function resetEverything(keepArea){
     { const s10 = document.getElementById('huc10-select'); s10.value = ''; s10.disabled = true; s10.innerHTML = '<option value="">Choose a HUC‑8 first</option>'; }
     document.getElementById('aquext-select').value = '';
     document.getElementById('studyarea-select').value = '';
+    document.getElementById('gwfs-select').value = '';
+    { const g = document.getElementById('gwfssub-select'); g.value = ''; g.disabled = true; g.innerHTML = '<option value="">Choose a region first</option>'; }
   }
 
   // filters back to defaults
@@ -2212,6 +2216,9 @@ document.getElementById('layer-aquext').addEventListener('change', e=>{
 document.getElementById('layer-studyareas').addEventListener('change', e=>{
   if(e.target.checked) studyAreaLayer.addTo(map); else map.removeLayer(studyAreaLayer);
 });
+document.getElementById('layer-gwfs').addEventListener('change', e=>{
+  if(e.target.checked) gwfsLayer.addTo(map); else map.removeLayer(gwfsLayer);
+});
 
 function renderLegend(){
   const body = document.getElementById('legend-body');
@@ -2338,6 +2345,8 @@ AQUIFER_EXTENT_NAMES.forEach((name, idx)=>{
       style:{color, weight:1.5, fillColor:color, fillOpacity:0.18}}).addTo(aquiferExtentLayer);
   });
 });
+GWFS.regions.forEach(r=> r.polys.forEach(rings=> L.geoJSON({type:'Polygon', coordinates:rings}, {pane:'refPane', interactive:false, style:{color:'#9c4f96', weight:2.2, fillOpacity:0}}).addTo(gwfsLayer)));
+GWFS.subs.forEach(r=> r.polys.forEach(rings=> L.geoJSON({type:'Polygon', coordinates:rings}, {pane:'refPane', interactive:false, style:{color:'#9c4f96', weight:1.2, dashArray:'5,4', fillColor:'#9c4f96', fillOpacity:0.05}}).addTo(gwfsLayer)));
 STUDY_AREAS.forEach(sa=>{
   sa.polys.forEach(rings=>{
     L.geoJSON({type:'Polygon', coordinates:rings}, {pane:'refPane', interactive:false,
@@ -2364,9 +2373,11 @@ function pointInPieces(lng, lat, pieces){
 }
 const IDENT_EXTENTS = AQUIFER_EXTENT_POLYGONS.map(piecesFromPolys);
 const IDENT_STUDY = STUDY_AREAS.map(sa=>piecesFromPolys(sa.polys));
+const IDENT_GWFS = GWFS.regions.map(r=>piecesFromPolys(r.polys)), IDENT_GWFSSUB = GWFS.subs.map(r=>piecesFromPolys(r.polys));
 function identifyAt(latlng){
   const lng = latlng.lng, lat = latlng.lat;
-  const out = {extents:[], studies:[], county:-1, huc:-1, ose:-1, h12:-1};
+  const out = {extents:[], studies:[], county:-1, huc:-1, ose:-1, h12:-1, gwfs:-1, gwfssub:-1};
+  if(map.hasLayer(gwfsLayer)){ out.gwfs = IDENT_GWFS.findIndex(pcs=>pointInPieces(lng,lat,pcs)); out.gwfssub = IDENT_GWFSSUB.findIndex(pcs=>pointInPieces(lng,lat,pcs)); }
   if(map.hasLayer(aquiferExtentLayer)) IDENT_EXTENTS.forEach((pcs,i)=>{ if(pointInPieces(lng,lat,pcs)) out.extents.push(i); });
   if(map.hasLayer(studyAreaLayer)) IDENT_STUDY.forEach((pcs,i)=>{ if(pointInPieces(lng,lat,pcs)) out.studies.push(i); });
   if(map.hasLayer(countiesLayer)) out.county = countyFeatures.findIndex(f=> pointInPieces(lng,lat,(f._pieces||(f._pieces=piecesFromGeom(f.geometry)))));
@@ -2375,8 +2386,8 @@ function identifyAt(latlng){
   if(map.hasLayer(hucLayer)) out.huc = hucFeatures.findIndex(f=> pointInPieces(lng,lat,(f._pieces||(f._pieces=piecesFromGeom(f.geometry)))));
   return out;
 }
-function identifyIsEmpty(h){ return !h.extents.length && !h.studies.length && h.county<0 && h.huc<0 && h.ose<0 && h.h12<0; }
-const anyIdentifyLayerOn = ()=> [aquiferExtentLayer, studyAreaLayer, countiesLayer, hucLayer, oseLayer].some(l=>map.hasLayer(l)) || h12State.on;
+function identifyIsEmpty(h){ return !h.extents.length && !h.studies.length && h.county<0 && h.huc<0 && h.ose<0 && h.h12<0 && h.gwfs<0 && h.gwfssub<0; }
+const anyIdentifyLayerOn = ()=> [aquiferExtentLayer, studyAreaLayer, countiesLayer, hucLayer, oseLayer, gwfsLayer].some(l=>map.hasLayer(l)) || h12State.on;
 
 function identifyPopupContent(h){
   const root = document.createElement('div'); root.className = 'pop identify';
@@ -2409,6 +2420,11 @@ function identifyPopupContent(h){
         document.getElementById('studyarea-select').value = String(i);
       }, sa.link);
     });
+  }
+  if(h.gwfs>=0){
+    head('Groundwater summary (GWFS) region');
+    row('#9c4f96', GWFS.regions[h.gwfs].name, '', ()=> gwfsSelectRegion(h.gwfs));
+    if(h.gwfssub>=0) row('#9c4f96', GWFS.subs[h.gwfssub].name, '(sub-region)', ()=> gwfsSelectSub(h.gwfssub));
   }
   if(h.county>=0){
     const f = countyFeatures[h.county]; head('County');
@@ -2456,6 +2472,7 @@ map.on('click', e=>{
     const parts = [];
     if(h.extents.length) parts.push('<b>Aquifer extent:</b> '+h.extents.map(i=>AQUIFER_EXTENT_NAMES[i].replace(/_/g,' ')).join(' · '));
     if(h.studies.length) parts.push('<b>Study area:</b> '+h.studies.map(i=>STUDY_AREAS[i].name).join(' · '));
+    if(h.gwfs>=0) parts.push('<b>GWFS region:</b> '+escHtml(GWFS.regions[h.gwfs].name) + (h.gwfssub>=0 ? ' · <b>sub-region:</b> '+escHtml(GWFS.subs[h.gwfssub].name) : ''));
     if(h.county>=0) parts.push('<b>County:</b> '+countyFeatures[h.county].properties.NAME);
     if(h.h12>=0){ const x = h12State.feats[h.h12]; parts.push('<b>' + KM_LABEL[h12State.level] + ':</b> ' + escHtml(x.name) + ' ' + escHtml(h12Text(x.code))); }
     if(h.ose>=0) parts.push('<b>OSE basin:</b> '+escHtml(oseFeatures[h.ose].properties.Basin));
@@ -2541,6 +2558,37 @@ document.getElementById('huc10-select').addEventListener('change', e=>{
     setAreaSelection({type:'studyarea', polygons:sa.polys, label:'Study area: '+sa.name});
   });
 })();
+// GWFS region and sub-region pickers: the sub-region list follows the region (like HUC-8 -> HUC-10); "Whole region" goes
+// back to the region
+function gwfsFillSubs(ri){
+  const sub = document.getElementById('gwfssub-select'), reg = GWFS.regions[ri];
+  if(!reg){ sub.disabled = true; sub.innerHTML = '<option value="">Choose a region first</option>'; return; }
+  const subs = GWFS.subs.map((x, j) => [x, j]).filter(([x]) => x.region === reg.name);
+  document.getElementById('gwfs-select').value = String(ri);
+  if(!subs.length){ sub.disabled = true; sub.innerHTML = `<option value="">No sub-regions in ${escHtml(reg.name)}</option>`; return; }
+  sub.disabled = false;
+  sub.innerHTML = `<option value="">Whole region (${subs.length} sub-regions)</option>` + subs.map(([x, j]) => `<option value="${j}">${escHtml(x.name)}</option>`).join('');
+}
+function gwfsSelectRegion(ri){
+  const r = GWFS.regions[ri]; if(!r) return; gwfsFillSubs(ri);
+  setAreaSelection({type:'gwfs', polygons:r.polys, label:'GWFS region: '+r.name});
+}
+function gwfsSelectSub(j){
+  const x = GWFS.subs[j]; if(!x) return;
+  const ri = GWFS.regions.findIndex(r => r.name === x.region); gwfsFillSubs(ri);
+  document.getElementById('gwfssub-select').value = String(j);
+  setAreaSelection({type:'gwfssub', polygons:x.polys, label:'GWFS sub-region: '+x.name, region:x.region});
+}
+(function(){
+  const sel = document.getElementById('gwfs-select');
+  sel.innerHTML = '<option value="">Choose a region…</option>' + GWFS.regions.map((r, i) => `<option value="${i}">${escHtml(r.name)}</option>`).join('');
+  sel.addEventListener('change', e => { if(e.target.value === ''){ gwfsFillSubs(-1); return; } gwfsSelectRegion(+e.target.value); });
+  document.getElementById('gwfssub-select').addEventListener('change', e => {
+    if(e.target.value === ''){ const ri = +document.getElementById('gwfs-select').value; if(GWFS.regions[ri]) gwfsSelectRegion(ri); return; }
+    gwfsSelectSub(+e.target.value);
+  });
+})();
+
 
 /* -------------------------------------------------------------------- */
 /* 13b. Season / month-range filter                                     */
@@ -4284,7 +4332,7 @@ function hxSelBar(){
   const n = state.activeSet ? state.activeSet.size : 0, picked = hxPicked();
   if(picked){
     const where = state.areaSelection ? escHtml(state.areaSelection.label || 'Selected area') : `${state.clickSelectedSites.size.toLocaleString()} picked well(s)`;
-    el.innerHTML = `<b>${n.toLocaleString()}</b> well${n === 1 ? '' : 's'} selected · ${where}` + (n ? '' : '<br><span class="hint">None pass the current Data filters.</span>');
+    el.innerHTML = `<b>${n.toLocaleString()}</b> well${n === 1 ? '' : 's'} selected · ${where}` + (n ? '' : '<br><span class="hint">None pass the current Data filters (on the Hydrographs screen).</span>');
     go.textContent = 'View hydrographs →'; go.disabled = !n; delete go.dataset.statewide;
   } else {
     el.innerHTML = 'Choose an area on the left, draw a polygon, or click wells on the map (zoom in to see them).';
@@ -4363,7 +4411,7 @@ function hxFiltersHome(){ const sb = document.getElementById('sidebar'), fp = do
 function hxFiltersSync(){
   const acc = hxFilterSection(), fp = document.getElementById('tab-filters'), body = document.getElementById('acc-filters-body');
   if(!acc || !fp || !body) return;
-  if(hxScreen === 'charts' && acc.classList.contains('open')){
+  if(hxScreen !== 'map' && acc.classList.contains('open')){
     if(fp.parentNode !== body){ body.appendChild(fp); const tb = document.querySelector('.tab-btn[data-tab="filters"]'); if(tb) tb.click(); }   // starts the statistics tables loading, as the old tab did
   } else hxFiltersHome();
 }
@@ -4371,8 +4419,7 @@ function hxFiltersSync(){
 function hxPlaceForScreen(sc){
   const pb = document.getElementById('period-block'), home = document.getElementById('period-home'), slot = document.getElementById('period-slot-map');
   if(pb && home && slot){
-    if(sc === 'map'){ if(pb.parentNode !== slot) slot.appendChild(pb); }
-    else if(pb.previousSibling !== home) home.parentNode.insertBefore(pb, home.nextSibling);
+    if(pb.previousSibling !== home) home.parentNode.insertBefore(pb, home.nextSibling);
   }
   hxFiltersSync();
 }
@@ -4484,7 +4531,7 @@ function hxShowAsSync(){
 // aquifer extent, study area, or a drawn polygon) or up to 60 picked wells, the period, time step, what is shown, grouping,
 // season, water years, the Wells / Composite view and the highlighted well. Filters, uploaded files and HUC-10/12 areas are
 // not included (the Copy link button says so).
-var HXU_SELECTS = {county: 'county-select', huc: 'huc-select', ose: 'ose-select', aquiferExtent: 'aquext-select', studyarea: 'studyarea-select'};
+var HXU_SELECTS = {county: 'county-select', huc: 'huc-select', ose: 'ose-select', aquiferExtent: 'aquext-select', studyarea: 'studyarea-select', gwfs: 'gwfs-select', gwfssub: 'gwfssub-select'};
 var HXU_MAX_WELLS = 60;
 var hxuRestoring = false, hxuTimer = null;
 function hxuState(){
@@ -4564,6 +4611,7 @@ async function hxRestoreFromUrl(){
     if(q.a){
       const [key, name] = [q.a.slice(0, q.a.indexOf('|')), q.a.slice(q.a.indexOf('|') + 1)];
       const el = document.getElementById(key + '-select'); const want = name.trim().toLowerCase();
+      if(key === 'gwfssub'){ const j = GWFS.subs.findIndex(x => x.name.toLowerCase() === want); if(j >= 0) gwfsFillSubs(GWFS.regions.findIndex(r => r.name === GWFS.subs[j].region)); }
       const find = () => el && ([...el.options].find(o => o.value && o.textContent.trim().toLowerCase() === want) || [...el.options].find(o => o.value && o.textContent.trim().toLowerCase().includes(want)));
       let opt = find();
       for(let i = 0; i < 75 && !opt; i++){ await new Promise(r => setTimeout(r, 200)); opt = find(); }   // the lists fill in as the boundary files arrive
@@ -7368,7 +7416,7 @@ async function hxReportBuild(){
   const tbl = rows => '<table>' + rows.map(r => `<tr><th>${escHtml(r[0])}</th><td>${escHtml(r[1])}</td></tr>`).join('') + '</table>';
   let summ = null; try{ summ = await hxAreaSummary(res); }catch(e){ console.warn('area summary', e); }
   const pubRows = typeof hxPubFor === 'function' ? hxPubFor(state.activeSet || new Set(res.qualifying)) : [];
-  const pubHtml = pubRows.length ? '<h2>Published numbers for this area</h2><table class="r-pub"><tr><th>Source and area</th><th>Published</th><th>This tool</th></tr>' + pubRows.map(r => `<tr><td>${escHtml(r.title)}<br><span style="font-size:7.5pt;">${escHtml(r.what)}; ${escHtml(r.cover)}</span></td><td>${escHtml(r.pub)}</td><td>${escHtml(r.tool)}</td></tr>`).join('') + '</table>' : '';
+  const pubHtml = pubRows.length ? '<h2>Published numbers for this area</h2><table class="r-pub"><tr><th>Source and area</th><th>Published</th><th>This tool</th></tr>' + pubRows.map(r => `<tr><td>${escHtml(r.title)}<br><span style="font-size:7.5pt;">${escHtml(r.what)}; ${escHtml(r.cover)}</span></td><td>${escHtml(r.pub)}${r.says ? `<br><span style="font-size:7.5pt;">The report says: ${escHtml(r.says)}</span>` : ''}</td><td>${escHtml(r.tool)}${r.diff ? `<br><span style="font-size:7.5pt;">${escHtml(r.diff)}</span>` : ''}</td></tr>`).join('') + '</table>' : '';
   const summHtml = summ ? `<h2>Area summary</h2><p class="r-how">${escHtml(summ.text)}</p><p style="font-size:7.5pt;">Sources: ${escHtml(summ.refs.join('; '))} (full references in the tool's Help).</p>` : '';
   let box = document.getElementById('hx-report'); if(!box){ box = document.createElement('div'); box.id = 'hx-report'; document.body.appendChild(box); }
   const asOf = BOOT.info && BOOT.info.maxDate ? BOOT.info.maxDate : '';
@@ -7907,6 +7955,7 @@ function wdBody(s, L, opts){
     ${rd ? wdKv('Shallowest / deepest', wdFt(rd.min.v) + ' (' + rd.min.d + ') / ' + wdFt(rd.max.v) + ' (' + rd.max.d + ')') : ''}
     ${isFinite(siteTrend[s]) ? wdKv('Trend', (siteTrend[s] > 0 ? 'declining ' : 'rising ') + Math.abs(siteTrend[s]).toFixed(2) + ' ft/yr') : ''}
     ${isFinite(wtr) ? wdKv('Against the mapped water table', hxFmt(wtr, 0, true) + ' ft (mean level − NMBGMR 2026 map; the map is an estimate, least certain where wells are sparse)') : ''}
+    ${wdNmedRow(s)}
     ${L.nmb ? wdKv('NMBGMR monitoring', L.ocoAct ? 'actively monitored · ' + escHtml(wdList(L.ocoAct.group_names).join(', ')) : 'not in an active NMBGMR monitoring plan', 'NMBGMR') : ''}
     ${L.ocoSum && L.ocoSum.total_water_levels != null ? wdKv('NMBGMR readings', L.ocoSum.total_water_levels + (L.ocoSum.last_water_level_datetime ? ', last ' + String(L.ocoSum.last_water_level_datetime).slice(0, 10) : '') + (L.ocoSum.water_level_trend_ft_per_year != null ? ' · trend ' + (Math.abs(L.ocoSum.water_level_trend_ft_per_year) < 0.005 ? '0.00' : hxFmt(L.ocoSum.water_level_trend_ft_per_year, 2, true)) + ' ft/yr' : ''), 'NMBGMR') : ''}
     <div id="wd-api-${s}" class="pop-api"></div></div>`);
@@ -7943,6 +7992,7 @@ async function wdRender(s, box, opts){
   opts = opts || {};
   box.innerHTML = '<div class="wd-loading">Reading the OSE and NMBGMR well records…</div>';
   let L; try{ L = await wdLoad(s); }catch(e){ L = {notes: ['Well records could not be read: ' + (e.message || e)]}; }
+  try{ await hxCtxLoad(); }catch(e){}
   if(opts.isCurrent && !opts.isCurrent()) return;
   box.innerHTML = wdBody(s, L, opts);
   if(typeof apiLoadPopup === 'function'){
@@ -8069,21 +8119,44 @@ window.__hx = Object.assign(window.__hx || {}, {actLoad: hxActLoad, get act(){ r
 //    report's own wells with its own procedure (hxMyersGroup).
 //  - State Engineer Technical Report 34 (Busch & Hudson): mean 1965-66 change per monitoring area; recomputed on the
 //    report's wells from the readings nearest the published dates (hxHistGroup).
-//  - Rinehart et al. (2016), NMWRRI, table 2: storage change since the 1950s per HUC-8 (km3). Storage, not water level, so
-//    shown as context only.
+//  - Rinehart et al. (2016), NMWRRI, tables 1-2 and results text: storage change since the 1950s per HUC-8 (km3), with
+//    the report's buffer, screening, specific yield and finding. Storage, not water level, so context only.
 //  - Rinehart & Mamer, eds. (2017), NMWRRI: storage loss, Quay-Roosevelt-Curry and Lea County (Southern High Plains) and the
 //    Roswell Artesian Basin. Context only.
 //  - McGuire (2017), USGS SIR 2017-5040, table 2: area-weighted average water-level change in the NM part of the High
 //    Plains aquifer, predevelopment (about 1950) to 2015; shown next to this composite's own change over the same years.
 // An entry applies when enough of the selected wells fall in it (its wells, its HUC-8, its counties or basin, or its
-// aquifer). Nothing here uses the mapped water table.
+// aquifer). Open by default (the viewer's choice to close it is remembered). Nothing here uses the mapped water table.
 const PUB_CITE = {myers: 'Myers 2022, USGS OFR 2022-1008, table 15', tr34: 'Busch & Hudson, NM State Engineer Technical Report 34',
-  r16: 'Rinehart et al. 2016, NMWRRI, table 2', r17: 'Rinehart & Mamer 2017, NMWRRI', mcg: 'McGuire 2017, USGS SIR 2017-5040, table 2'};
+  r16: 'Rinehart et al. 2016, NMWRRI, tables 1–2', r17: 'Rinehart & Mamer 2017, NMWRRI', mcg: 'McGuire 2017, USGS SIR 2017-5040, table 2'};
+const PUB_URL = {myers: 'https://doi.org/10.3133/ofr20221008', mcg: 'https://doi.org/10.3133/sir20175040',
+  r16: 'https://nmwrri.nmsu.edu/statewide-water-assessment/research-project-categories/reports/groundwater-level-and-storage-changes/y2-final-Report-Groundwater_Level_and_Storage_Changes_in_Basin-fill_Aquifers_in_the_Rio_Grande_Basin_New_Mexico-Rinehartetal.pdf',
+  r17: 'https://nmwrri.nmsu.edu/statewide-water-assessment/research-project-categories/reports/groundwater-level-and-storage-changes/WRRI_TechCompReport-June2017.pdf'};
 const PUB_R17 = [
-  {name: 'Quay, Roosevelt and Curry counties (Southern High Plains)', counties: ['Quay', 'Roosevelt', 'Curry'], text: 'a little over 8 million acre-feet of storage lost from the 1950s to the 2010s, with steady declines; much of the area no longer has enough saturated thickness for high-volume irrigation'},
-  {name: 'Lea County (Southern High Plains)', counties: ['Lea'], text: 'at least 3 million acre-feet lost from the 1950s to the 2010s; changes in the well network between the 1980s and 2000s created artificial gains, so this is a low estimate'},
-  {name: 'Roswell Artesian Basin (Pecos Slope)', ose: /roswell/i, text: 'about 3.75 million acre-feet cumulative storage loss in the shallow (alluvial) aquifer and about 4 for both aquifers, close to the 3.5 million acre-feet pumping-minus-recharge deficit; in the confined Permian aquifer large head declines (about 150 ft near Artesia) came from small volumes'}];
+  {name: 'Quay, Roosevelt and Curry counties (Southern High Plains)', counties: ['Quay', 'Roosevelt', 'Curry'], text: 'a little over 8 million acre-feet of storage lost from the 1950s to the 2010s, with steady declines',
+    details: ['Much of the area no longer has enough saturated thickness for high-volume irrigation; the largest declines are where the estimate is most certain.',
+      'Method: decade median depth to water (November–February, pumping readings removed, wells with fewer than 3 readings dropped) turned into water-table elevation with a 10 m DEM; cubic polynomial trend plus ordinary kriging of the residuals, checked by leave-one-out cross-validation; saturated thickness above the Ogallala base; storage = change in saturated thickness × specific yield (Gutentag et al. 1984).',
+      'Earlier work found about 15 million acre-feet lost since predevelopment (1930s) across the NM Southern High Plains (McGuire 2009, 2014); this report\'s 11.4 for both areas from the 1950s is lower, probably from losses before the 1950s and unreliable 1980s–2000s networks in Lea County.']},
+  {name: 'Lea County (Southern High Plains)', counties: ['Lea'], text: 'at least 3 million acre-feet lost from the 1950s to the 2010s',
+    details: ['Changes in the well network between the 1980s and the 2000s created artificial gains in the interpolation, so this is a low estimate; the last two decades depend heavily on individual wells.',
+      'Declines are less stark than in Quay–Roosevelt–Curry because the initial saturated thickness was larger.',
+      'Method as for Quay–Roosevelt–Curry, with spatially varying specific yield (about 0.125 on average) instead of a single Ogallala value.']},
+  {name: 'Roswell Artesian Basin (Pecos Slope)', ose: /roswell/i, text: 'about 3.75 million acre-feet cumulative loss in the shallow (alluvial) aquifer; about 4 for both aquifers',
+    details: ['The 4 million acre-feet for both aquifers is close to the 3.5 million acre-feet deficit from pumping (about 350–400 thousand acre-feet a year) exceeding recharge (about 300 thousand) for 70 years.',
+      'In the confined Permian (San Andres) aquifer, large head declines (about 150 ft near Artesia) came from small volumes, because storativity (about 0.0005) is some 300 times smaller than specific yield (0.17).',
+      'Wells were split by completion unit (Permian vs alluvial) before interpolation, and the confined area was tracked each decade from San Andres tops picked on oil and gas logs.',
+      'Storage loss in the alluvial aquifer has declined steadily since the 1940s, slowed in the 1980s, recovered briefly in the 1990s, then declined again.']}];
 var hxPub = {key: null, rows: [], polys: new Map(), pending: false};
+// this composite's median by decade (mean of the plotted values in each decade), as change from the 1950s or the first decade
+// it covers; feet, + = rising. For setting the reports' decade numbers beside the line, not a storage estimate.
+function hxPubDecades(){
+  const r = computeComposite(); if(!r || !r.xvals || !r.xvals.length || otUnits() !== 'ft') return null;
+  const by = new Map(); r.xvals.forEach((x, i) => { const v = r.medianSeries[i]; if(v == null) return; const d = Math.floor(x / 10) * 10; if(d < 1950 || d > 2020) return; const a = by.get(d) || []; a.push(v); by.set(d, a); });
+  const ds = [...by.keys()].sort((a, b) => a - b); if(ds.length < 2) return null;
+  const mean = a => a.reduce((x, y) => x + y, 0) / a.length, base = ds[0], b0 = mean(by.get(base)), sg = state.valueMode === 'elevation' ? 1 : -1;
+  return {base, parts: ds.slice(1).map(d => `${d}s ${hxFmt(sg * (mean(by.get(d)) - b0), 1, true)}`)};
+}
+const hxPubDecLine = () => { const dc = hxPubDecades(); return dc ? `This composite by decade (median line, current settings, change from the ${dc.base}s, + = rising): ${dc.parts.join(', ')} ft.` : null; };
 function hxPubPolys(key, feats, test){
   if(hxPub.polys.has(key)) return hxPub.polys.get(key);
   const f = (feats || []).filter(test); if(!f.length) return null;
@@ -8098,42 +8171,94 @@ function hxPubCompChange(y0, y1){
   const d = r.medianSeries[i1] - r.medianSeries[i0];
   return {rise: state.valueMode === 'elevation' ? d : -d, y0: r.xvals[i0], y1: r.xvals[i1]};
 }
+// a small chart: labels along x, one or two series (bars or lines), zero line, values at the ends
+function hxPubSpark(o){
+  const W = 300, H = 92, pl = 34, pr = 8, pt = 8, pb = 18, n = o.labels.length;
+  const all = []; o.series.forEach(s => s.vals.forEach(v => { if(v != null && isFinite(v)) all.push(v); })); (o.marks || []).forEach(m => all.push(m.v)); all.push(0);
+  let lo = Math.min(...all), hi = Math.max(...all); if(hi - lo < 1e-9){ hi += 1; lo -= 1; } const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  const X = i => pl + (n > 1 ? i * (W - pl - pr) / (n - 1) : (W - pl - pr) / 2), Y = v => pt + (hi - v) * (H - pt - pb) / (hi - lo);
+  const bw = Math.max(4, (W - pl - pr) / Math.max(1, n) * 0.5);
+  const fmt = v => Math.abs(v) >= 10 ? Math.round(v) : (+v.toFixed(1));
+  let g = `<line x1="${pl}" x2="${W - pr}" y1="${Y(0)}" y2="${Y(0)}" class="ps-zero"/>`;
+  g += `<text x="${pl - 4}" y="${Y(hi - pad) + 3}" class="ps-ax" text-anchor="end">${fmt(hi - pad)}</text><text x="${pl - 4}" y="${Y(lo + pad) + 3}" class="ps-ax" text-anchor="end">${fmt(lo + pad)}</text>`;
+  o.labels.forEach((l, i) => { if(n <= 6 || i === 0 || i === n - 1 || i % Math.ceil(n / 4) === 0) g += `<text x="${X(i)}" y="${H - 4}" class="ps-ax" text-anchor="middle">${escHtml(l)}</text>`; });
+  o.series.forEach((s, k) => {
+    if(s.kind === 'bar') s.vals.forEach((v, i) => { if(v == null) return; const y = Y(Math.max(v, 0)), h = Math.abs(Y(v) - Y(0)); g += `<rect x="${X(i) - bw / 2}" y="${y}" width="${bw}" height="${Math.max(h, 0.8)}" class="ps-s${k}"><title>${escHtml(s.name + ', ' + o.labels[i] + ': ' + v)}</title></rect>`; });
+    else { let d = '', on = false; s.vals.forEach((v, i) => { if(v == null){ on = false; return; } d += (on ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); on = true; });
+      g += `<path d="${d}" class="ps-l${k}" fill="none"/>` + s.vals.map((v, i) => v == null ? '' : `<circle cx="${X(i)}" cy="${Y(v)}" r="2.2" class="ps-d${k}"><title>${escHtml(s.name + ', ' + o.labels[i] + ': ' + v)}</title></circle>`).join(''); }
+  });
+  (o.marks || []).forEach(m => { g += `<path d="M${X(m.i) - 5} ${Y(m.v)} L${X(m.i)} ${Y(m.v) - 5} L${X(m.i) + 5} ${Y(m.v)} L${X(m.i)} ${Y(m.v) + 5} Z" class="ps-mark"><title>${escHtml(m.name + ': ' + m.v)}</title></path>`; });
+  const key = o.series.map((s, k) => `<span class="ps-key"><i class="ps-k${k}"></i>${escHtml(s.name)}</span>`).join('') + (o.marks || []).map(m => `<span class="ps-key"><i class="ps-km"></i>${escHtml(m.name)}</span>`).join('');
+  return `<div class="pub-spark"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${escHtml(o.title || '')}">${g}</svg><div class="ps-keys">${key}${o.unit ? `<span class="ps-unit">${escHtml(o.unit)}</span>` : ''}</div></div>`;
+}
 function hxPubFor(pool){
   const P = typeof PUBLISHED_NUMBERS !== 'undefined' ? PUBLISHED_NUMBERS : null, out = []; if(!P || !pool || !pool.size) return out;
-  const f1 = v => v == null ? '–' : hxFmt(v, Math.abs(v) < 10 ? 2 : 1, true);
+  const f1 = v => v == null ? '–' : Math.abs(v) < 0.005 ? '0.00' : hxFmt(v, Math.abs(v) < 10 ? 2 : 1, true);
   const enough = (k, n) => k >= 3 && k >= 0.25 * n;
   // Myers 2022: the report's wells
   P.myers.forEach(g => {
     const ids = g.ids.filter(id => { const s = hxuSite('USGS-NWIS~USGS-' + id); return s != null && pool.has(s); });
     if(!enough(ids.length, g.ids.length)) return;
-    const t = hxMyersGroup(g.ids, g.start, g.end);
+    const t = hxMyersGroup(g.ids, g.start, g.end), nb = t.meanBins.length;
+    const labels = Array.from({length: nb}, (_, i) => { const a = g.start + 5 * i; return a + '–' + String(a + 4).slice(2); });
+    const rel = a => a[0] == null ? a.map(() => null) : a.map(v => v == null ? null : Math.round(-(v - a[0]) * 10) / 10);
+    const dm = t.qualifying ? g.mean - (-t.meanChange) : null, dd = t.qualifying ? g.median - (-t.medianChange) : null;
     out.push({src: 'myers', title: `Myers 2022, table ${g.table}: ${g.name}`,
-      what: `Water-level change, ${g.start}–${(g.start % 100 + 4 + '').padStart(2, '0')} to 2015–19 water years (median of each well's readings in 5-year bins; + = rising)`,
+      what: `Water-level change, ${labels[0]} to ${labels[nb - 1]} water years (+ = rising)`,
       pub: `mean ${f1(g.mean)} ft, median ${f1(g.median)} ft (${g.ids.length} wells)`,
       tool: t.qualifying ? `same wells and procedure: mean ${f1(-t.meanChange)} ft, median ${f1(-t.medianChange)} ft (${t.qualifying} of ${t.found} wells qualify with the current reading rules)` : 'none of the report\'s wells qualify with the current reading rules',
-      cover: `${ids.length} of the report's ${g.ids.length} wells are in this selection`, cite: PUB_CITE.myers});
+      diff: t.qualifying ? `published − this tool: mean ${f1(dm)} ft, median ${f1(dd)} ft` + (Math.max(Math.abs(dm), Math.abs(dd)) <= 1.5 ? ' (agrees within 1.5 ft)' : '') : null,
+      spark: t.qualifying ? {title: 'Change by 5-year bin', labels, series: [{name: 'this tool, mean', vals: rel(t.meanBins), kind: 'line'}, {name: 'this tool, median', vals: rel(t.medianBins), kind: 'line'}],
+        marks: [{name: 'published mean change', i: nb - 1, v: g.mean}], unit: 'ft since the first bin, + = rising'} : null,
+      details: [`Method: per well, the median of its readings in each 5-year bin of water years; a well counts only with a reading in every bin; readings qualified as pumping or artesian removed; the composite is the mean and the median across wells. Wells were grouped by hand by aquifer, location and hydrograph shape.`,
+        'This tool uses the report\'s own well list, so a difference comes from readings added, revised or screened differently since the report.',
+        `The report warns that a composite summarises its wells, not the whole aquifer, and that the mean follows outlying wells while the median does not.`,
+        ...(g.note ? [g.note] : []),
+        `${ids.length} of the report's ${g.ids.length} wells are in this selection${ids.length < g.ids.length ? '; the numbers above use all of them' : ''}.`],
+      cover: `${ids.length} of the report's ${g.ids.length} wells are in this selection`, cite: PUB_CITE.myers, url: PUB_URL.myers});
   });
   // TR 34: the report's wells
   P.tr34.forEach(g => {
     const k = g.keys.filter(x => { const s = hxuSite(x); return s != null && pool.has(s); });
     if(!enough(k.length, g.keys.length)) return;
-    const t = hxHistGroup(g.keys, 1965, 1966, g.dates);
-    out.push({src: 'tr34', title: `Technical Report 34: ${g.area}`, what: 'Mean change in observation wells, January 1965 to January 1966 (+ = rising)',
+    const t = hxHistGroup(g.keys, 1965, 1966, g.dates), tv = t.nBoth ? -t.meanChange : null;
+    out.push({src: 'tr34', title: `Technical Report 34: ${g.area}`, what: 'Mean change in the State Engineer observation wells, January 1965 to January 1966 (+ = rising)',
       pub: `${f1(g.mean)} ft (${g.keys.length} wells)`,
-      tool: t.nBoth ? `same wells, readings nearest the published dates: ${f1(-t.meanChange)} ft (${t.nBoth} wells)` : 'not enough readings near the published dates',
+      tool: t.nBoth ? `same wells, readings nearest the published dates: ${f1(tv)} ft (${t.nBoth} wells)` : 'not enough readings near the published dates',
+      diff: t.nBoth ? `published − this tool: ${f1(g.mean - tv)} ft` : null,
+      details: ['The report tabulates each observation well\'s January–February 1966 level and its change from the same measurement a year earlier; the area figure is the mean of those changes.',
+        'Each of the report\'s wells was matched to its API well by location number and by the published level on the published date; rows whose published change the API readings did not reproduce (mostly OCR misreads of the scanned report) were left out.',
+        'One year of change says little about the long-term trend; use it to check that the historical readings in the API are the ones the State Engineer published.',
+        `${k.length} of the report's ${g.keys.length} wells are in this selection.`],
       cover: `${k.length} of the report's ${g.keys.length} wells are in this selection`, cite: PUB_CITE.tr34});
   });
   // HUC-8 based (Rinehart 2016)
   if(siteH10){
     const by = new Map(); let nh = 0; pool.forEach(s => { const h = h10Of(s); if(!h) return; nh++; const h8 = String(h).slice(0, 8); by.set(h8, (by.get(h8) || 0) + 1); });
+    const dec = ['1960s', '1970s', '1980s', '1990s', '2000s', '2010s'];
     P.r16.forEach(g => {
       const k = by.get(g.huc8) || 0; if(k < 3 || k < 0.2 * nh) return;
-      const dec = ['1960s', '1970s', '1980s', '1990s', '2000s', '2010s'], parts = [];
-      dec.forEach((d, i) => { const kr = g.total[2 * i + 1], idw = g.total[2 * i]; const v = kr != null ? kr : idw; if(v != null) parts.push(`${d} ${hxFmt(v, 2, true)}${kr == null ? ' (IDW)' : ''}`); });
-      out.push({src: 'r16', title: `Rinehart et al. 2016: ${g.name} (HUC-8 ${g.huc8})`, what: 'Groundwater storage change compared with the 1950s, km³ (kriging; IDW where no kriging; ×0.81 = million acre-feet), basin-fill aquifer, November–February readings',
-        pub: parts.join(', ') || 'no decade estimated',
-        tool: `storage, not water level, so no direct comparison: the report used specific yield ${g.sy}; compare the direction and timing with the composite`,
-        cover: `${k} of this selection's ${nh} wells are in this HUC-8`, cite: PUB_CITE.r16});
+      const kr = g.method !== 'idw', pick = (a, alt) => dec.map((d, i) => a ? a[2 * i + ((kr !== !!alt) ? 1 : 0)] : null), tot = pick(g.total), cum = pick(g.cumul), oth = pick(g.total, true), parts = [];
+      dec.forEach((d, i) => { if(tot[i] != null) parts.push(`${d} ${hxFmt(tot[i], 2, true)}`); });
+      const last = tot.reduce((a, v, i) => v != null ? i : a, -1);
+      out.push({src: 'r16', title: `Rinehart et al. 2016: ${g.name} (HUC-8 ${g.huc8})`,
+        what: `Groundwater storage change compared with the 1950s, km³ (${kr ? 'kriging' : 'inverse-distance weighting'}), basin-fill aquifer`,
+        pub: (parts.join(', ') || 'no decade estimated') + (last >= 0 ? ` (${dec[last]}: ${hxFmt(tot[last] * 0.8107, 2, true)} million acre-feet)` : ''),
+        tool: 'storage, not water level, so no direct comparison; compare the direction and timing with the composite',
+        says: g.note,
+        spark: last >= 0 ? {title: 'Storage change by decade', labels: dec, series: [{name: 'change from the 1950s', vals: tot, kind: 'bar'}, ...(cum ? [{name: 'summed decade-to-decade', vals: cum, kind: 'line'}] : [])], unit: 'km³'} : null,
+        details: [`Specific yield ${g.sy} (${g.syRef}); map limited to within ${g.corr} km (the correlation length) of wells measured in both decades; ${g.screen}; the report's figure ${g.fig}.`,
+          'Per well, the median depth to water of each decade, interpolated on a 100 m grid and clipped to basin fill; storage = water-level change × specific yield × area. Where the two estimates (change from the 1950s, and summed decade-to-decade changes) disagree, the well network changed between decades.',
+          ...(oth.some(v => v != null) ? [`The report's ${kr ? 'inverse-distance-weighting' : 'kriging'} map instead gives, from the 1950s: ${dec.map((d, i) => oth[i] != null ? d + ' ' + hxFmt(oth[i], 2, true) : null).filter(Boolean).join(', ')} km³.`] : []),
+          ...(hxPubDecLine() ? [hxPubDecLine()] : []),
+          `${k} of this selection's ${nh} wells are in this HUC-8.`],
+        cover: `${k} of this selection's ${nh} wells are in this HUC-8`, cite: PUB_CITE.r16, url: PUB_URL.r16});
+    });
+    (P.r16_nodata || []).forEach(g => {
+      const k = by.get(g.huc8) || 0; if(k < 3 || k < 0.2 * nh) return;
+      out.push({src: 'r16', title: `Rinehart et al. 2016: ${g.name} (HUC-8 ${g.huc8})`, what: 'Groundwater storage change compared with the 1950s',
+        pub: 'examined, but not enough data for an estimate', tool: 'no comparison', details: [`${k} of this selection's ${nh} wells are in this HUC-8.`],
+        cover: `${k} of this selection's ${nh} wells are in this HUC-8`, cite: PUB_CITE.r16, url: PUB_URL.r16});
     });
   } else if(!hxPub.pending){ hxPub.pending = true; ensureSiteH10().then(r => { hxPub.pending = false; if(r){ hxPub.key = null; hxPubSched(); } }); }
   // county / basin based (Rinehart & Mamer 2017)
@@ -8143,7 +8268,8 @@ function hxPubFor(pool){
     if(!polys) return;
     const k = pts.filter(r => pointInPolygons(r[1], r[2], polys)).length; if(k < 3 || k < 0.25 * pts.length) return;
     out.push({src: 'r17', title: `Rinehart & Mamer 2017: ${g.name}`, what: 'Groundwater storage change', pub: g.text,
-      tool: 'storage, not water level, so no direct comparison', cover: `${k} of this selection's ${pts.length} wells are in the area`, cite: PUB_CITE.r17});
+      tool: 'storage, not water level, so no direct comparison', details: [...g.details, ...(hxPubDecLine() ? [hxPubDecLine()] : []), `${k} of this selection's ${pts.length} wells are in the area.`],
+      cover: `${k} of this selection's ${pts.length} wells are in the area`, cite: PUB_CITE.r17, url: PUB_URL.r17});
   });
   // aquifer based (McGuire 2017)
   const hp = AQUIFER_EXTENT_NAMES.findIndex(n => /high.?plains|ogallala/i.test(n));
@@ -8154,15 +8280,25 @@ function hxPubFor(pool){
       out.push({src: 'mcg', title: 'McGuire 2017: High Plains aquifer in New Mexico', what: 'Area-weighted average water-level change, predevelopment (about 1950) to 2015, whole NM part of the aquifer (+ = rising)',
         pub: '−16.5 ft (101 wells); 2013–15: −0.1 ft (71 wells); recoverable storage −9.7 million acre-feet',
         tool: c ? `this composite (the selected wells, a different area and method), ${c.y0} to ${c.y1}: ${f1(c.rise)} ft` : 'this composite does not cover both about 1950 and 2015',
-        cover: `${k} of this selection's ${pts.length} wells are in the High Plains aquifer outline`, cite: PUB_CITE.mcg});
+        details: ['For comparison, the whole High Plains aquifer (eight states) averaged −15.8 ft, and Texas −41.1 ft.',
+          'Method: a map of water-level change from predevelopment to 2015 drawn from wells and earlier published maps, averaged over the area (areas with little or no saturated thickness left out). In New Mexico, 60 wells without a 2015 reading had their 2015 level estimated from nearby years.',
+          'The tool\'s composite follows the selected wells, which cluster where water is pumped, so it is not expected to equal an area-weighted average.',
+          `${k} of this selection's ${pts.length} wells are in the High Plains aquifer outline.`],
+        cover: `${k} of this selection's ${pts.length} wells are in the High Plains aquifer outline`, cite: PUB_CITE.mcg, url: PUB_URL.mcg});
     }
   }
   return out;
 }
 function hxPubHtml(rows){
-  return rows.map(r => `<div class="pub-row"><b>${escHtml(r.title)}</b><div class="pub-what">${escHtml(r.what)}</div>
-    <div><span class="pub-k">Published</span> ${escHtml(r.pub)}</div><div><span class="pub-k">This tool</span> ${escHtml(r.tool)}</div>
-    <div class="pub-cover">${escHtml(r.cover)} · <i>${escHtml(r.cite)}</i></div></div>`).join('');
+  return rows.map(r => `<div class="pub-row"><div class="pub-h"><b>${escHtml(r.title)}</b>${r.url ? ` <a href="${escHtml(r.url)}" target="_blank" rel="noopener" class="linklike">report ↗</a>` : ''}</div>
+    <div class="pub-what">${escHtml(r.what)}</div>
+    <div class="pub-kv"><span class="pub-k">Published</span><span>${escHtml(r.pub)}</span></div>
+    <div class="pub-kv"><span class="pub-k">This tool</span><span>${escHtml(r.tool)}</span></div>
+    ${r.diff ? `<div class="pub-kv"><span class="pub-k">Difference</span><span>${escHtml(r.diff)}</span></div>` : ''}
+    ${r.says ? `<div class="pub-kv"><span class="pub-k">Report says</span><span>${escHtml(r.says)}</span></div>` : ''}
+    ${r.spark ? hxPubSpark(r.spark) : ''}
+    ${r.details && r.details.length ? `<ul class="pub-det">${r.details.map(d => `<li>${escHtml(d)}</li>`).join('')}</ul>` : ''}
+    <div class="pub-cover"><i>${escHtml(r.cite)}</i></div></div>`).join('');
 }
 function hxPubRender(){
   const box = document.getElementById('pub-strip'); if(!box) return;
@@ -8171,16 +8307,16 @@ function hxPubRender(){
   hxPub.rows = pool && pool.size ? hxPubFor(pool) : [];
   box.style.display = hxPub.rows.length ? '' : 'none';
   box.querySelector('summary').innerHTML = `Published numbers for this area <span class="pub-n">${hxPub.rows.length}</span>`;
-  box.querySelector('.pub-body').innerHTML = hxPubHtml(hxPub.rows) + '<p class="hint">An entry appears when at least a quarter of the selected wells (and at least 3) are among the report\'s wells or in its area. "This tool" is recomputed from the readings whenever the method allows; storage volumes cannot be compared with a water-level line.</p>';
+  box.querySelector('.pub-body').innerHTML = `<div class="pub-grid">${hxPubHtml(hxPub.rows)}</div><p class="hint">An entry appears when at least a quarter of the selected wells (and at least 3) are among the report's wells or in its area. "This tool" is recomputed from the readings whenever the method allows (Myers 2022 and Technical Report 34, on the reports' own wells); storage volumes and whole-aquifer averages are not the same quantity as the composite line, so they are shown for context. The mapped water table is not used.</p>`;
 }
 var hxPubT = 0;
 function hxPubSched(){ clearTimeout(hxPubT); hxPubT = setTimeout(() => { try{ hxPubRender(); }catch(e){ console.warn('published numbers', e); } }, 500); }
 (function hxPubInit(){
   const after = document.getElementById('cov-caption'); if(!after || document.getElementById('pub-strip')) return;
-  const d = document.createElement('details'); d.id = 'pub-strip'; d.style.display = 'none';
+  const d = document.createElement('details'); d.id = 'pub-strip'; d.style.display = 'none'; d.open = true;
   d.innerHTML = '<summary></summary><div class="pub-body"></div>'; after.after(d);
-  try{ if(localStorage.getItem('hx-pub-open') === '1') d.open = true; }catch(e){}
-  d.addEventListener('toggle', () => { try{ localStorage.setItem('hx-pub-open', d.open ? '1' : '0'); }catch(e){} });
+  try{ if(localStorage.getItem('hx-pub-closed') === '1') d.open = false; }catch(e){}
+  d.addEventListener('toggle', () => { try{ localStorage.setItem('hx-pub-closed', d.open ? '0' : '1'); }catch(e){} });
   const prev = renderChart; renderChart = function(){ const r = prev.apply(this, arguments); hxPubSched(); return r; };
 })();
 window.__hx = Object.assign(window.__hx || {}, {pubFor: hxPubFor, get pub(){ return hxPub; }, pubRender: () => { hxPub.key = null; hxPubRender(); return hxPub.rows; }});
@@ -8250,7 +8386,9 @@ async function hxAreaSummary(res){
         S.push(`¹⁴C at ${pl(c14.length, 'well', 'wells')}: ${old.length ? (old.length > 1 ? 'apparent ages ' + num.c14.min.toLocaleString() + ' to ' + num.c14.max.toLocaleString() + ' years' : 'apparent age ' + num.c14.min.toLocaleString() + ' years') : ''}${mod ? (old.length ? '; ' : '') + pl(mod, 'sample', 'samples') + ' with modern carbon (zero or negative age, recharged since the 1950s or mixed with such water)' : ''}; ages are uncorrected, and carbonate dissolution and mixing make water look older than its youngest part.`); refs.add('Plummer & Glynn 2013'); }
     }catch(e){ S.push(`NMBGMR chemistry could not be loaded for this area (${e.name === 'AbortError' ? 'timed out' : e.message}).`); num.chemError = true; }
   }
-  // 5. published numbers
+  // 5. drought, metered pumping and public water systems in the area
+  try{ const cx = await hxCtxSummary(res); cx.sentences.forEach(x => S.push(x)); cx.refs.forEach(r => refs.add(r)); Object.assign(num, cx.numbers); }catch(e){ console.warn('context summary', e); }
+  // 6. published numbers
   const pub = hxPubFor(state.activeSet || new Set(q)); num.published = pub.map(r => ({title: r.title, published: r.pub, tool: r.tool, coverage: r.cover, cite: r.cite}));
   if(pub.length) S.push(`Published for this area: ${pub.map(r => `${r.title} — ${r.pub}${r.src === 'myers' || r.src === 'tr34' ? ' (this tool, ' + r.tool.replace(/^same wells[^:]*: /, '') + ')' : ''}`).join('; ')}.`);
   else S.push('None of the published comparisons built into the tool (Myers 2022; Technical Report 34; Rinehart et al. 2016; Rinehart & Mamer 2017; McGuire 2017) covers enough of these wells.');
@@ -8259,6 +8397,242 @@ async function hxAreaSummary(res){
   return {text: S.join(' '), sentences: S, refs: [...refs], numbers: num};
 }
 window.__hx = Object.assign(window.__hx || {}, {areaSummary: hxAreaSummary});
+// ---- context under the composite: drought, metered pumping, public water systems --------------------------------------
+// context-data.bin (tools/build-context-data.py): U.S. Drought Monitor weekly area shares since 2000 for the state, counties,
+// HUC-8s and HUC-10s; screened OSE metered pumping by point of diversion and accounting year; NMED public water systems and
+// their sources. Drawn as two strips aligned with the composite's years, and used in the area summary. All measured or
+// published values; nothing interpolated, and the mapped water table is not used.
+var hxCtx = {data: null, p: null, key: null, drought: null, pump: null, pws: null};
+const USDM_COL = ['#ffff00', '#fcd37f', '#ffaa00', '#e60000', '#730000'], USDM_LAB = ['D0 abnormally dry', 'D1 moderate', 'D2 severe', 'D3 extreme', 'D4 exceptional'];
+const PUMP_GROUPS = [['Irrigation', ['IRR'], '#5b8c3a'], ['Public supply', ['MUN', 'MDW'], '#2f6fb0'], ['Domestic', ['DOM', 'MUL', 'DOL'], '#9a7bb8'], ['Other uses', null, '#a08a62']];
+function hxCtxLoad(){
+  if(hxCtx.p) return hxCtx.p;
+  hxCtx.p = (async () => {
+    for(const u of ['context-data.bin']){
+      try{ const r = await fetch(u); if(!r.ok) continue; const d = JSON.parse(window.pako.inflate(new Uint8Array(await r.arrayBuffer()), {to: 'string'}));
+        // the drought series are stored as first value + weekly differences; expand once
+        Object.keys(d.usdm.c).forEach(k => { d.usdm.c[k] = d.usdm.c[k].map(col => { const o = new Float32Array(col.length); let v = 0; for(let i = 0; i < col.length; i++){ v += col[i]; o[i] = v / 10; } return o; }); });
+        const t0 = Date.parse(d.usdm.first); d.usdm.week = i => new Date(t0 + i * 7 * 86400000);
+        hxCtx.data = d; return d; }catch(e){ console.warn('context data', e); }
+    }
+    return null;
+  })();
+  return hxCtx.p;
+}
+// is a point in the selected area: the selection polygon, else within 5 km of the composite's wells (statewide: everywhere)
+function hxCtxInside(res){
+  const sel = state.areaSelection;
+  if(sel && sel.polygons && sel.polygons.length){ let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    sel.polygons.forEach(P => P.forEach(R => R.forEach(c => { x0 = Math.min(x0, c[0]); x1 = Math.max(x1, c[0]); y0 = Math.min(y0, c[1]); y1 = Math.max(y1, c[1]); })));
+    return {how: 'inside ' + (sel.label || 'the selected area'), f: (x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1 && pointInPolygons(x, y, sel.polygons)}; }
+  const pts = (res && res.qualifying ? res.qualifying : [...(state.activeSet || [])]).map(s => SITES[s]).filter(r => r && r[1] != null);
+  if(!pts.length || (!state.clickSelectedSites.size && state.statewideOk)) return {how: 'statewide', f: () => true};
+  const cx = Math.cos(34.4 * Math.PI / 180);
+  return {how: 'within 5 km of the composite\'s wells', f: (x, y) => pts.some(r => Math.abs(r[1] - x) < 0.06 && Math.abs(r[2] - y) < 0.05 && Math.hypot((r[1] - x) * 111.32 * cx, (r[2] - y) * 110.57) <= 5)};
+}
+// drought area: the selected county, HUC-8 or HUC-10 itself; otherwise the HUC-10s holding the composite's wells, weighted by
+// how many wells each holds
+function hxCtxDroughtArea(res){
+  const U = hxCtx.data.usdm, sel = state.areaSelection;
+  if(sel){
+    if(sel.type === 'county'){ const nm = (sel.label || '').replace(/^County:\s*/, ''), f = countyFeatures.find(x => x.properties.NAME === nm);
+      const g = f && String(f.properties.GEOID); if(g && U.c[g]) return {parts: [[g, 1]], label: nm + ' County'}; }
+    if((sel.type === 'huc' || sel.type === 'huc10' || sel.type === 'huc12') && sel.huc){ const h = sel.type === 'huc12' ? String(sel.huc).slice(0, 10) : String(sel.huc);
+      if(U.c[h]) return {parts: [[h, 1]], label: (sel.type === 'huc' ? 'HUC-8 ' : 'HUC-10 ') + h}; }
+  }
+  if(siteH10 && res && res.qualifying){ const n = new Map(); res.qualifying.forEach(s => { const h = h10Of(s); if(h && U.c[h]) n.set(h, (n.get(h) || 0) + 1); });
+    if(n.size) return {parts: [...n.entries()], label: n.size === 1 ? 'HUC-10 ' + [...n.keys()][0] : `the ${n.size} HUC-10s holding the composite's wells (weighted by wells)`}; }
+  return {parts: [['NM', 1]], label: 'New Mexico'};
+}
+// weekly shares -> one value per plotted year (or step): mean share of the area in each category (exclusive D0..D4)
+function hxCtxDrought(res){
+  const U = hxCtx.data.usdm, A = hxCtxDroughtArea(res), wsum = A.parts.reduce((a, p) => a + p[1], 0), B = state.otp.bin > 1 ? state.otp.bin : 1;
+  const cum = [0, 1, 2, 3, 4].map(k => { const o = new Float32Array(U.n); A.parts.forEach(([c, w]) => { const s = U.c[c][k]; for(let i = 0; i < U.n; i++) o[i] += s[i] * w / wsum; }); return o; });
+  const yearOf = i => { const d = U.week(i), y = d.getUTCFullYear(); return state.waterYear && d.getUTCMonth() >= 9 ? y + 1 : y; };
+  const ms = state.season.monthStart, me = state.season.monthEnd, full = seasonIsFullYear();
+  const inSeason = i => { if(full) return true; const m = U.week(i).getUTCMonth() + 1; return ms <= me ? m >= ms && m <= me : m >= ms || m <= me; };
+  const vals = res.xvals.map(x => { const a0 = B > 1 ? x - otBinMid(B) : x, a1 = a0 + B - 1, s = [0, 0, 0, 0, 0]; let n = 0;
+    for(let i = 0; i < U.n; i++){ const y = yearOf(i); if(y < a0 || y > a1 || !inSeason(i)) continue; n++; for(let k = 0; k < 5; k++) s[k] += cum[k][i]; }
+    if(!n) return null; const c = s.map(v => v / n); return [c[0] - c[1], c[1] - c[2], c[2] - c[3], c[3] - c[4], c[4]]; });
+  return {label: A.label, vals, last: U.last, first: U.first};
+}
+function hxCtxPumping(res){
+  const P = hxCtx.data.pump, ins = hxCtxInside(res), B = state.otp.bin > 1 ? state.otp.bin : 1, grp = u => { const c = P.uses[u]; const g = PUMP_GROUPS.findIndex(x => x[1] && x[1].includes(c)); return g < 0 ? 3 : g; };
+  const pods = P.pods.filter(p => ins.f(p[0], p[1]));
+  if(!pods.length) return {how: ins.how, n: 0};
+  const byYear = new Map(), useAF = new Map();
+  pods.forEach(p => { const g = grp(p[2]); p[5].forEach((v, i) => { if(v == null) return; const y = p[4] + i; let r = byYear.get(y); if(!r){ r = {g: [0, 0, 0, 0], n: 0}; byYear.set(y, r); } r.g[g] += v; r.n++;
+    const c = P.uses[p[2]]; useAF.set(c, (useAF.get(c) || 0) + v); }); });
+  const vals = res.xvals.map(x => { const a0 = B > 1 ? x - otBinMid(B) : x, a1 = a0 + B - 1, g = [0, 0, 0, 0]; let ny = 0, n = 0;
+    for(let y = a0; y <= a1; y++){ const r = byYear.get(y); if(!r) continue; ny++; n += r.n; r.g.forEach((v, k) => g[k] += v); }
+    return ny ? {g: g.map(v => v / ny), n: Math.round(n / ny)} : null; });
+  const years = [...byYear.keys()].sort((a, b) => a - b), full = years.filter(y => y < new Date().getFullYear());
+  const lastFull = full.length ? full[full.length - 1] : null;
+  let peak = null; full.forEach(y => { const r = byYear.get(y); if(!peak || r.n > peak[1]) peak = [y, r.n]; });
+  return {how: ins.how, n: pods.length, pods, vals, byYear, years, lastFull, peak, uses: [...useAF.entries()].sort((a, b) => b[1] - a[1])};
+}
+// change in metered pumping at the same meters: wells reporting in year y1 and in at least one year of [a0, a1]
+function hxCtxPumpSame(pu, a0, a1, y1){
+  let n = 0, now = 0, before = 0;
+  pu.pods.forEach(p => { const at = y => { const i = y - p[4]; return i >= 0 && i < p[5].length ? p[5][i] : null; };
+    const v1 = at(y1); if(v1 == null) return; const e = []; for(let y = a0; y <= a1; y++){ const v = at(y); if(v != null) e.push(v); }
+    if(!e.length) return; n++; now += v1; before += e.reduce((a, b) => a + b, 0) / e.length; });
+  return n ? {n, now, before} : null;
+}
+function hxCtxPws(res){
+  const D = hxCtx.data.pws, ins = hxCtxInside(res), out = [];
+  D.systems.forEach(s => { const src = s[7].filter(w => w[3] === 'GW' && ins.f(w[1], w[0])); if(src.length) out.push({id: s[0], name: s[1], county: s[2], pop: s[3] || 0, size: s[4], type: s[5], prim: s[6], src}); });
+  const deps = out.flatMap(s => s.src.map(w => w[2])).filter(v => v > 0).sort((a, b) => a - b);
+  return {how: ins.how, systems: out.sort((a, b) => b.pop - a.pop), pop: out.reduce((a, s) => a + s.pop, 0), community: out.filter(s => s.type === 'C'), depths: deps, gen: D.gen};
+}
+var hxCtxCharts = [];
+function hxCtxEls(){
+  let d = document.getElementById('ctx-strips'); if(d) return d;
+  d = document.createElement('div'); d.id = 'ctx-strips';
+  d.innerHTML = `<div class="ctx-row" id="ctx-drought"><div class="ctx-canvas"><canvas></canvas></div><p class="hint ctx-cap"></p></div>
+    <div class="ctx-row" id="ctx-pump"><div class="ctx-canvas"><canvas></canvas></div><p class="hint ctx-cap"></p></div>`;
+  const pub = document.getElementById('pub-strip'), cov = document.getElementById('cov-caption');
+  if(pub) pub.before(d); else cov.after(d);
+  return d;
+}
+async function hxCtxRender(){
+  const box = hxCtxEls(); hxCtxCharts.forEach(c => c.destroy()); hxCtxCharts = [];
+  const res = window._lastComposite;
+  if(!res || !res.xvals || !res.xvals.length || !chart || state.showAllWells){ box.style.display = 'none'; return; }
+  box.style.display = '';
+  const D = await hxCtxLoad(); if(!D){ box.style.display = 'none'; return; }
+  const css = getComputedStyle(document.documentElement), muted = css.getPropertyValue('--muted').trim() || '#888', border = css.getPropertyValue('--border').trim() || '#ddd';
+  const yAx = (title, extra) => Object.assign({grid: {color: border}, ticks: {color: muted, maxTicksLimit: 3}, title: {display: true, text: title, color: muted, font: {size: 10}},
+    afterFit: ax => { if(chart && chart.scales.y) ax.width = chart.scales.y.width; }}, extra || {});
+  const y2 = {position: 'right', grid: {display: false}, ticks: {display: false}, afterFit: ax => { if(chart && chart.scales.yN) ax.width = chart.scales.yN.width; }};
+  // drought
+  const dr = hxCtxDrought(res); hxCtx.drought = dr;
+  const dRow = document.getElementById('ctx-drought'), anyD = dr.vals.some(v => v);
+  dRow.style.display = anyD ? '' : 'none';
+  if(anyD){
+    hxCtxCharts.push(new Chart(dRow.querySelector('canvas').getContext('2d'), {type: 'bar',
+      data: {labels: res.labels, datasets: [0, 1, 2, 3, 4].map(k => ({label: USDM_LAB[k], data: dr.vals.map(v => v ? Math.round(v[k] * 10) / 10 : null), backgroundColor: USDM_COL[k], stack: 'd', barPercentage: 1, categoryPercentage: 0.9}))},
+      options: {responsive: true, maintainAspectRatio: false, animation: false, plugins: {legend: {display: false}, tooltip: {callbacks: {label: c => c.raw ? `${c.dataset.label}: ${c.raw.toFixed(0)}% of the area` : ''}}},
+        scales: {x: {display: false, stacked: true}, y: yAx('drought %', {stacked: true, min: 0, max: 100, ticks: {color: muted, maxTicksLimit: 3, callback: v => v + '%'}}), y2}}}));
+    const d2 = dr.vals.map((v, i) => v ? [res.xvals[i], v[2] + v[3] + v[4]] : null).filter(Boolean), worst = d2.slice().sort((a, b) => b[1] - a[1])[0];
+    dRow.querySelector('.ctx-cap').innerHTML = escHtml(`Drought (U.S. Drought Monitor, ${dr.label}; weekly maps ${dr.first.slice(0, 4)}–${dr.last}, averaged over each plotted ${state.otp.bin > 1 ? 'step' : 'year'}${seasonIsFullYear() ? '' : ' and season'}): share of the area in each category, yellow (abnormally dry) to dark red (exceptional).` +
+      (worst ? ` Most severe: ${worst[0]}, ${worst[1].toFixed(0)}% in severe drought or worse.` : '') + ' Years before 2000 have no Drought Monitor maps.');
+  }
+  // pumping
+  const pu = hxCtxPumping(res); hxCtx.pump = pu;
+  const pRow = document.getElementById('ctx-pump'), anyP = pu.n && pu.vals.some(v => v);
+  pRow.style.display = anyP ? '' : 'none';
+  if(anyP){
+    const ds = PUMP_GROUPS.map((g, k) => ({type: 'bar', label: g[0], data: pu.vals.map(v => v ? Math.round(v.g[k]) : null), backgroundColor: g[2], stack: 'p', yAxisID: 'y', barPercentage: 1, categoryPercentage: 0.9}));
+    ds.push({type: 'line', label: 'Meters reporting', data: pu.vals.map(v => v ? v.n : null), yAxisID: 'y2', borderColor: muted, backgroundColor: muted, borderWidth: 1.2, pointRadius: 0, borderDash: [3, 2], spanGaps: false});
+    hxCtxCharts.push(new Chart(pRow.querySelector('canvas').getContext('2d'), {type: 'bar', data: {labels: res.labels, datasets: ds},
+      options: {responsive: true, maintainAspectRatio: false, animation: false, plugins: {legend: {display: false}, tooltip: {callbacks: {label: c => c.raw == null ? '' : c.dataset.label === 'Meters reporting' ? `${c.raw} meters reporting` : `${c.dataset.label}: ${c.raw.toLocaleString()} acre-ft`}}},
+        scales: {x: {display: false, stacked: true}, y: yAx('acre-ft/yr', {stacked: true, min: 0}), y2: Object.assign({}, y2, {min: 0, ticks: {display: true, color: muted, maxTicksLimit: 3}})}}}));
+    const lf = pu.lastFull, r = lf ? pu.byYear.get(lf) : null;
+    const fell = r && pu.peak && r.n < 0.7 * pu.peak[1];
+    pRow.querySelector('.ctx-cap').innerHTML = (fell ? `<span class="ctx-warn">Meters reporting fell from ${pu.peak[1]} (${pu.peak[0]}) to ${r.n} (${lf}): pumping at the wells that stopped reporting is missing from the later bars, not zero.</span> ` : '') +
+      escHtml(`Metered groundwater pumping (OSE meter readings, ${pu.how}; ${pu.n.toLocaleString()} metered wells): stacked by use, irrigation green, public supply blue, domestic purple, other brown; the dashed line is how many meters reported.` +
+      (r ? ` ${lf}: ${Math.round(r.g.reduce((a, b) => a + b, 0)).toLocaleString()} acre-ft from ${r.n} meters.` : '') +
+      ' Only metered wells count, and fewer than half of New Mexico\'s withdrawals are metered, so this is a floor; bars rise and fall as meters start and stop reporting as well as with pumping. Implausible meter years were screened out (Help).');
+  }
+  if(!anyD && !anyP) box.style.display = 'none';
+  // public water systems, for the summary and the report
+  hxCtx.pws = hxCtxPws(res);
+}
+var hxCtxT = 0;
+function hxCtxSched(){ clearTimeout(hxCtxT); hxCtxT = setTimeout(() => { hxCtxRender().catch(e => console.warn('context strips', e)); }, 600); }
+(function hxCtxInit(){
+  hxCtxEls(); document.getElementById('ctx-strips').style.display = 'none';
+  const prev = renderChart; renderChart = function(){ const r = prev.apply(this, arguments); hxCtxSched(); return r; };
+})();
+// sentences for the area summary
+async function hxCtxSummary(res){
+  const D = await hxCtxLoad(); if(!D) return {sentences: [], refs: [], numbers: {}};
+  const S = [], refs = [], num = {};
+  const dr = hxCtxDrought(res), d2 = dr.vals.map((v, i) => v ? [res.xvals[i], v[2] + v[3] + v[4]] : null).filter(Boolean);
+  if(d2.length){ const w = d2.slice().sort((a, b) => b[1] - a[1])[0], rec = d2.slice(-5), m5 = rec.reduce((a, b) => a + b[1], 0) / rec.length;
+    num.drought = {area: dr.label, worstYear: w[0], worstD2plusPct: Math.round(w[1]), last5MeanD2plusPct: Math.round(m5)};
+    S.push(`U.S. Drought Monitor (${dr.label}): the most severe plotted year was ${w[0]}, with ${w[1].toFixed(0)}% of the area in severe drought or worse; over the last ${rec.length} plotted years the average was ${m5.toFixed(0)}%. Compare the composite's dips and recoveries with these years; in pumped aquifers dry years usually mean more pumping (Russo & Lall 2017).`);
+    refs.push('U.S. Drought Monitor', 'Russo & Lall 2017'); }
+  const pu = hxCtxPumping(res);
+  if(pu.n && pu.lastFull){ const r = pu.byYear.get(pu.lastFull), tot = r.g.reduce((a, b) => a + b, 0), top = pu.uses.slice(0, 3).map(u => u[0]).join(', ');
+    const same = hxCtxPumpSame(pu, pu.lastFull - 14, pu.lastFull - 10, pu.lastFull);
+    num.pumping = {metered_wells: pu.n, year: pu.lastFull, acre_ft: Math.round(tot), meters: r.n, top_uses: top, peak_meters: pu.peak, same_meters: same && {wells: same.n, before_af: Math.round(same.before), now_af: Math.round(same.now)}};
+    S.push(`OSE meter readings: ${pu.n.toLocaleString()} metered wells ${pu.how}; in ${pu.lastFull} ${r.n} of them reported ${Math.round(tot).toLocaleString()} acre-ft (largest uses by OSE code: ${top}).` +
+      (same ? ` At the ${same.n} meters that reported both then and ${pu.lastFull - 14}–${pu.lastFull - 10}, pumping went from about ${Math.round(same.before).toLocaleString()} to ${Math.round(same.now).toLocaleString()} acre-ft a year (${same.before > 0 ? hxFmt(100 * (same.now - same.before) / same.before, 0, true) + '%' : 'n/a'}).` : '') +
+      (pu.peak && r.n < 0.7 * pu.peak[1] ? ` Meters reporting fell from ${pu.peak[1]} in ${pu.peak[0]} to ${r.n}, so totals across all meters are not comparable over time.` : '') +
+      ' Fewer than half of New Mexico\'s withdrawals are metered, so these are floors.');
+    refs.push('OSE meter readings (NMWRRS)', 'NM Groundwater Alliance 2026'); }
+  const pw = hxCtxPws(res);
+  if(pw.systems.length){ num.publicWaterSystems = {systems: pw.systems.length, community: pw.community.length, population: pw.pop, sourceDepthRangeFt: pw.depths.length ? [pw.depths[0], pw.depths[pw.depths.length - 1]] : null};
+    S.push(`${pw.systems.length} public water system${pw.systems.length === 1 ? '' : 's'} (${pw.community.length} community) draw groundwater from wells ${pw.how}, serving about ${pw.pop.toLocaleString()} people` +
+      (pw.depths.length ? `; their wells are ${pw.depths[0]}–${pw.depths[pw.depths.length - 1]} ft deep (median ${Math.round(OT.median(pw.depths))})` : '') + ` (NMED Drinking Water Bureau, ${pw.gen}).`);
+    refs.push('NMED Drinking Water Bureau'); }
+  const sw = hxSwlSummary(res);
+  if(sw && sw.ok){ num.nmedStaticLevels = sw;
+    S.push(`NMED recorded a one-time static water level at ${sw.n} public supply well${sw.n === 1 ? '' : 's'} ${sw.how} (${sw.y0 === sw.y1 ? sw.y0 : sw.y0 + '–' + sw.y1}): ${sw.ok > 1 ? Math.round(sw.min) + ' to ' + Math.round(sw.max) + ' ft below land, median ' + Math.round(sw.median) : Math.round(sw.median) + ' ft below land'}` +
+      (sw.recentN && sw.recentN < sw.ok ? `; ${sw.recentN} of them from the last 10 years, median ${Math.round(sw.recentMedian)} ft` : '') + `${sw.n > sw.ok ? `; ${sw.n - sw.ok} with an invalid date or deeper than the well are left out` : ''}. These are single readings at pumped supply wells, so they show depth to water where monitoring wells may be sparse, not trends.`);
+    if(!refs.includes('NMED Drinking Water Bureau')) refs.push('NMED Drinking Water Bureau'); }
+  return {sentences: S, refs, numbers: num};
+}
+window.__hx = Object.assign(window.__hx || {}, {ctxLoad: hxCtxLoad, ctxRender: hxCtxRender, get ctx(){ return hxCtx; }, ctxSummary: hxCtxSummary, ctxPws: r => hxCtxPws(r || computeComposite())});
+// ---- NMED static water levels at public supply wells (one reading per source, in context-data.bin) ----------------------
+// From the NMED Drinking Water Bureau source records: the static water level NMED recorded at each public-supply source, with
+// its date. One reading per well, at pumped supply wells, so they are a map layer, a line in the well details (when an API
+// well is within 10 m) and a sentence in the area summary, never part of a composite. A reading is flagged when its date is
+// missing or in the future, or when it is deeper than the recorded well depth.
+function hxSwlList(){
+  if(!hxCtx.data) return [];
+  if(hxCtx.swl) return hxCtx.swl;
+  const yNow = new Date().getFullYear(), out = [];
+  hxCtx.data.pws.systems.forEach(s => s[7].forEach(w => { if(w[5] == null || w[0] == null) return;
+    const y = w[6] ? +String(w[6]).slice(0, 4) : null, flags = [];
+    if(!y || y > yNow) flags.push('date missing or invalid'); if(w[2] > 0 && w[5] > w[2]) flags.push('deeper than the recorded well depth');
+    out.push({lat: w[0], lon: w[1], depth: w[2], swl: w[5], date: w[6] || null, year: y && y <= yNow ? y : null, source: w[7], sys: s[1], id: s[0], pop: s[3], flags}); }));
+  hxCtx.swl = out; return out;
+}
+function hxSwlNear(s, m){
+  const r = SITES[s]; if(!r || r[1] == null) return null; const cx = Math.cos(r[2] * Math.PI / 180); let best = null;
+  hxSwlList().forEach(w => { if(Math.abs(w.lat - r[2]) > 0.001 || Math.abs(w.lon - r[1]) > 0.0012) return; const d = Math.hypot((w.lat - r[2]) * 110570, (w.lon - r[1]) * 111320 * cx);
+    if(d <= (m || 10) && (!best || d < best.m)) best = Object.assign({m: d}, w); });
+  return best;
+}
+function wdNmedRow(s){
+  const w = hxSwlNear(s, 10); if(!w) return '';
+  return wdKv('NMED static level', `${hxFmt(w.swl, 0)} ft${w.date ? ' (' + escHtml(w.date) + ')' : ''} · ${escHtml(w.sys)}, ${escHtml(w.source || 'source')} (${Math.round(w.m)} m away)${w.flags.length ? ' · ' + escHtml(w.flags.join('; ')) : ''}; a single reading at a public supply well`, 'NMED');
+}
+const SWL_BINS = [[50, '#2c7bb6', '< 50 ft'], [150, '#74add1', '50–150'], [300, '#fdae61', '150–300'], [600, '#f46d43', '300–600'], [Infinity, '#a50026', '≥ 600 ft']];
+var hxSwlLayer = null;
+async function hxSwlLayerGet(){
+  if(hxSwlLayer) return hxSwlLayer;
+  await hxCtxLoad(); const g = L.layerGroup();
+  hxSwlList().forEach(w => { const c = SWL_BINS.find(b => w.swl < b[0]);
+    L.circleMarker([w.lat, w.lon], {radius: 4, weight: 1, color: '#333', fillColor: c[1], fillOpacity: w.flags.length ? 0.35 : 0.9, pane: 'refPane'})
+      .bindTooltip(`<b>${escHtml(w.sys)}</b> · ${escHtml(w.source || '')}<br>Static water level ${hxFmt(w.swl, 0)} ft below land${w.date ? ' (' + escHtml(w.date) + ')' : ''}${w.depth ? '<br>Well depth ' + w.depth + ' ft' : ''}${w.flags.length ? '<br><i>' + escHtml(w.flags.join('; ')) + '</i>' : ''}<br><span style="font-size:11px;">NMED Drinking Water Bureau; one reading at a public supply well</span>`, {sticky: true}).addTo(g); });
+  hxSwlLayer = g; return g;
+}
+(function hxSwlInit(){
+  const anchor = document.getElementById('layer-ose'); if(!anchor || document.getElementById('layer-nmed-swl')) return;
+  const d = document.createElement('div'); d.className = 'row';
+  d.innerHTML = `<label><input type="checkbox" id="layer-nmed-swl"> NMED static water levels at public supply wells (one reading each)</label>
+    <div class="hint" style="margin:2px 0 0 22px;">${SWL_BINS.map(b => `<span style="display:inline-block; width:9px; height:9px; border-radius:50%; background:${b[1]}; margin:0 3px 0 6px;"></span>${b[2]}`).join('')}</div>`;
+  anchor.closest('.row').after(d);
+  d.querySelector('input').addEventListener('change', async e => { const g = await hxSwlLayerGet(); if(e.target.checked) g.addTo(map); else map.removeLayer(g); });
+})();
+// area summary sentence
+function hxSwlSummary(res){
+  const ins = hxCtxInside(res), w = hxSwlList().filter(x => ins.f(x.lon, x.lat)); if(!w.length) return null;
+  const ok = w.filter(x => !x.flags.length), v = ok.map(x => x.swl).sort((a, b) => a - b), ys = ok.map(x => x.year).sort((a, b) => a - b), rec = ok.filter(x => x.year >= new Date().getFullYear() - 10).map(x => x.swl).sort((a, b) => a - b);
+  return {n: w.length, ok: ok.length, median: v.length ? OT.median(v) : null, min: v[0], max: v[v.length - 1], y0: ys[0], y1: ys[ys.length - 1], recentN: rec.length, recentMedian: rec.length ? OT.median(rec) : null, how: ins.how};
+}
+window.__hx = Object.assign(window.__hx || {}, {swlList: hxSwlList, swlNear: hxSwlNear, swlSummary: r => hxSwlSummary(r || computeComposite()), swlLayer: hxSwlLayerGet});
+window.__hx = Object.assign(window.__hx || {}, {gwfs: GWFS, gwfsSelectRegion, gwfsSelectSub,
+  // one well's identity and record, for checks and the area-question skill
+  siteInfo(s){ const r = SITES[s], R = BOOT.raw; if(!r) return null; const n = R && s < R.off.length - 1 ? R.off[s + 1] - R.off[s] : 0;
+    return {key: rawWellKey(s).replace('\u0001', '~'), source: r[3] >= 0 ? SOURCES[r[3]] : null, id: r[0], lon: r[1], lat: r[2], depth: r[4], n,
+      first: n ? rawDateOf(R.day[R.off[s]]) : null, last: n ? rawDateOf(R.day[R.off[s + 1] - 1]) : null,
+      years: n ? new Set(Array.from(R.day.subarray(R.off[s], R.off[s + 1]), d => rawDateOf(d).slice(0, 4))).size : 0}; },
+  get nSites(){ return SITES.length; }});
 setTimeout(()=>{ apiLoadClusters().catch(e=>{ console.warn('clusters failed', e); apiState.clusters = 'error'; }); }, 400);
 BOOT.ui.done();
 })().catch(e=>{ console.error(e); if(window.__bootFail) window.__bootFail(e); });
