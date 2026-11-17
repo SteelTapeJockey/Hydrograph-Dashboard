@@ -228,6 +228,12 @@ with sync_playwright() as p:
     check('area summary includes drought, metered pumping, public water systems and NMED static levels', all(k in cs for k in ['U.S. Drought Monitor', 'OSE meter readings', 'public water system', 'NMED recorded a one-time static water level']), cs[-700:])
     sw = pg5.evaluate("async () => { const l = __hx.swlList(); const g = await __hx.swlLayer(); return {n: l.length, flagged: l.filter(x => x.flags.length).length, markers: g.getLayers().length, box: !!document.getElementById('layer-nmed-swl')}; }")
     check('NMED static water levels: 1,500+ supply wells, map layer and checkbox, a few flagged', sw['n'] >= 1500 and sw['markers'] == sw['n'] and sw['box'] and 0 < sw['flagged'] < 50, sw)
+    gw = pg5.evaluate("""() => { const G = __hx.gwfs, ri = G.regions.findIndex(r => r.name === 'Middle Rio Grande'); __hx.gwfsSelectRegion(ri);
+      const a = {label: __hx.state.areaSelection.label, n: __hx.state.activeSet.size, subs: [...document.querySelectorAll('#gwfssub-select option')].length - 1};
+      __hx.gwfsSelectSub(G.subs.findIndex(x => x.name === 'Albuquerque')); const b = {label: __hx.state.areaSelection.label, n: __hx.state.activeSet.size, region: document.getElementById('gwfs-select').selectedOptions[0].textContent};
+      return {regions: G.regions.length, subsAll: G.subs.length, a, b}; }""")
+    check('GWFS regions (10) and sub-regions (20): Middle Rio Grande lists its 4 sub-regions; Albuquerque is a smaller selection inside it', gw['regions'] == 10 and gw['subsAll'] == 20 and gw['a']['label'] == 'GWFS region: Middle Rio Grande' and gw['a']['subs'] == 4 and gw['b']['label'] == 'GWFS sub-region: Albuquerque' and 0 < gw['b']['n'] < gw['a']['n'] and gw['b']['region'] == 'Middle Rio Grande', gw)
+    pg5.evaluate("() => { const e = document.getElementById('county-select'); const o = [...e.options].find(x => x.textContent.trim() === 'Chaves'); e.value = o.value; e.dispatchEvent(new Event('change')); }"); pg5.wait_for_timeout(3000)
     rep = pg5.evaluate("async () => { const r = await __hx.reportBuild(); return {pub: r.published, summ: !!r.summary, h: [...document.querySelectorAll('#hx-report h2')].map(e => e.textContent)}; }")
     check('area report has the area summary and the published-numbers table', rep['summ'] and rep['pub'] >= 3 and 'Area summary' in rep['h'] and 'Published numbers for this area' in rep['h'], rep)
     pg5.close()
